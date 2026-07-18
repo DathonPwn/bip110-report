@@ -1,0 +1,2499 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BlockSlop — BIP110 Late-Upgrade Chainstate Validation Gap</title>
+<meta name="description" content="BlockSlop: a detailed validation report on history-dependent retention of BIP110-invalid blocks when an existing Bitcoin Knots datadir is upgraded from non-enforcing to enforcing software.">
+<style>
+  :root {
+    color-scheme: light dark;
+
+    --paper: #f7f5f0;
+    --paper-raised: #fffefb;
+    --ink: #1a1c20;
+    --ink-soft: #4a4d54;
+    --ink-faint: #7c7f86;
+    --hair: #dcd9d1;
+    --hair-strong: #c7c3b8;
+    --accent: #c47215;
+    --accent-soft: rgba(196,114,21,0.10);
+    --danger: #c0392b;
+    --danger-soft: rgba(192,57,43,0.10);
+    --valid: #2c8760;
+    --valid-soft: rgba(44,135,96,0.10);
+    --code-bg: #efece4;
+    --code-ink: #33363c;
+
+    --mono: ui-monospace, "SF Mono", "SFMono-Regular", "JetBrains Mono", "Menlo", "Consolas", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+
+    --measure: 68ch;
+    --shell: 1180px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0d0f12;
+      --paper-raised: #14171c;
+      --ink: #e7e5df;
+      --ink-soft: #a7aab2;
+      --ink-faint: #6d7178;
+      --hair: #24272d;
+      --hair-strong: #333740;
+      --accent: #e8973a;
+      --accent-soft: rgba(232,151,58,0.12);
+      --danger: #e0574d;
+      --danger-soft: rgba(224,87,77,0.12);
+      --valid: #46b083;
+      --valid-soft: rgba(70,176,131,0.12);
+      --code-bg: #1a1e24;
+      --code-ink: #c4c7cd;
+    }
+  }
+
+  :root[data-theme="light"] {
+    --paper: #f7f5f0; --paper-raised: #fffefb; --ink: #1a1c20; --ink-soft: #4a4d54;
+    --ink-faint: #7c7f86; --hair: #dcd9d1; --hair-strong: #c7c3b8; --accent: #c47215;
+    --accent-soft: rgba(196,114,21,0.10); --danger: #c0392b; --danger-soft: rgba(192,57,43,0.10);
+    --valid: #2c8760; --valid-soft: rgba(44,135,96,0.10); --code-bg: #efece4; --code-ink: #33363c;
+  }
+  :root[data-theme="dark"] {
+    --paper: #0d0f12; --paper-raised: #14171c; --ink: #e7e5df; --ink-soft: #a7aab2;
+    --ink-faint: #6d7178; --hair: #24272d; --hair-strong: #333740; --accent: #e8973a;
+    --accent-soft: rgba(232,151,58,0.12); --danger: #e0574d; --danger-soft: rgba(224,87,77,0.12);
+    --valid: #46b083; --valid-soft: rgba(70,176,131,0.12); --code-bg: #1a1e24; --code-ink: #c4c7cd;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 17px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection { background: var(--accent-soft); }
+
+  a { color: var(--accent); text-underline-offset: 2px; }
+
+  /* ---------- shell ---------- */
+  .wrap { max-width: var(--shell); margin: 0 auto; padding: 0 28px; }
+  .prose { max-width: var(--measure); }
+
+  /* ---------- top bar ---------- */
+  header.topbar {
+    position: sticky; top: 0; z-index: 50;
+    background: color-mix(in srgb, var(--paper) 88%, transparent);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--hair);
+  }
+  .topbar .wrap {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 54px; gap: 20px;
+  }
+  .brand {
+    font-family: var(--mono); font-size: 13px; letter-spacing: 0.02em;
+    font-weight: 600; color: var(--ink);
+  }
+  .brand .dot { color: var(--accent); }
+  .topnav { display: flex; gap: 22px; }
+  .topnav a {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.03em;
+    color: var(--ink-faint); text-decoration: none; text-transform: uppercase;
+    transition: color .15s;
+  }
+  .topnav a:hover { color: var(--ink); }
+  @media (max-width: 720px) { .topnav { display: none; } }
+
+  /* ---------- hero ---------- */
+  .hero { padding: 92px 0 64px; border-bottom: 1px solid var(--hair); }
+  .eyebrow {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--accent); margin: 0 0 26px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .eyebrow::before {
+    content: ""; width: 30px; height: 1px; background: var(--accent);
+  }
+  .hero h1 {
+    font-family: var(--sans); font-weight: 760; font-size: clamp(3.8rem, 12vw, 8rem);
+    line-height: 0.94; letter-spacing: -0.045em; margin: 0 0 20px;
+    text-wrap: balance;
+  }
+  .hero .tagline {
+    font-family: var(--sans); font-weight: 600;
+    font-size: clamp(1.05rem, 3.2vw, 2.15rem); line-height: 1.12; letter-spacing: -0.02em;
+    color: var(--ink); margin: 0 0 26px;
+  }
+  .hero .tagline-main,
+  .hero .tagline-emphasis { display: block; }
+  .hero .tagline-main { white-space: nowrap; }
+  .hero .tagline-emphasis { color: var(--accent); margin-top: 0.08em; }
+  .hero .herolinks { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 9px; text-decoration: none;
+    font-family: var(--mono); font-size: 13px; font-weight: 600; letter-spacing: 0.01em;
+    padding: 11px 18px; border-radius: 9px; transition: transform .12s ease, background .15s ease, border-color .15s ease;
+  }
+  .btn .ic { font-size: 14px; line-height: 1; }
+  .btn.primary { background: var(--accent); color: var(--paper); border: 1px solid var(--accent); }
+  .btn.primary:hover { transform: translateY(-1px); }
+  .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--hair-strong); }
+  .btn.ghost:hover { border-color: var(--accent); color: var(--accent); }
+  @media (prefers-reduced-motion: reduce) { .btn:hover { transform: none; } }
+  .hero .lede {
+    font-size: clamp(1.05rem, 2vw, 1.28rem); line-height: 1.55;
+    color: var(--ink-soft); max-width: 62ch; margin: 0;
+  }
+  .hero .lede strong { color: var(--ink); font-weight: 600; }
+
+  /* meta strip */
+  .metastrip {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+    background: var(--hair); border: 1px solid var(--hair);
+    margin-top: 52px; border-radius: 8px; overflow: hidden;
+  }
+  .metastrip .cell { background: var(--paper); padding: 16px 18px; }
+  .metastrip .k {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--ink-faint); margin: 0 0 6px;
+  }
+  .metastrip .v {
+    font-family: var(--mono); font-size: 13.5px; color: var(--ink);
+    font-weight: 600; word-break: break-word;
+  }
+  @media (max-width: 720px) { .metastrip { grid-template-columns: repeat(2, 1fr); } }
+
+  /* ---------- sections ---------- */
+  section { padding: 72px 0; border-bottom: 1px solid var(--hair); scroll-margin-top: 54px; }
+  .sectionhead { margin-bottom: 40px; }
+  .sectionhead .num {
+    font-family: var(--mono); font-size: 12px; color: var(--accent);
+    letter-spacing: 0.1em; display: block; margin-bottom: 12px;
+  }
+  .sectionhead h2 {
+    font-size: clamp(1.5rem, 3vw, 2.1rem); font-weight: 700; letter-spacing: -0.015em;
+    margin: 0; line-height: 1.1; text-wrap: balance;
+  }
+  .sectionhead p.sub { color: var(--ink-soft); margin: 14px 0 0; max-width: var(--measure); }
+
+  p { margin: 0 0 1.05em; }
+  .prose p:last-child { margin-bottom: 0; }
+  strong { font-weight: 640; }
+  code {
+    font-family: var(--mono); font-size: 0.86em;
+    background: var(--code-bg); color: var(--code-ink);
+    padding: 0.12em 0.4em; border-radius: 4px;
+  }
+
+  .minihead {
+    font-family: var(--mono); font-size: 13px; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--ink-faint); margin: 0 0 12px;
+  }
+  .detail-block { margin-top: 42px; }
+  .detail-grid {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px;
+    margin-top: 18px;
+  }
+  .detail-box {
+    border: 1px solid var(--hair); border-radius: 10px; background: var(--paper-raised);
+    padding: 22px 24px;
+  }
+  .detail-box h4 { margin: 0 0 8px; font-size: 16px; line-height: 1.3; }
+  .detail-box p { margin: 0; color: var(--ink-soft); font-size: 14.5px; line-height: 1.6; }
+  .compact-list { margin: 10px 0 0; padding-left: 1.2em; color: var(--ink-soft); }
+  .compact-list li { margin: 0.45em 0; padding-left: 0.2em; }
+  .number-grid {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
+    counter-reset: item; margin-top: 18px;
+  }
+  .number-grid .item {
+    counter-increment: item; display: grid; grid-template-columns: 34px 1fr; gap: 12px;
+    align-items: start; border: 1px solid var(--hair); border-radius: 9px;
+    padding: 17px 18px; background: var(--paper-raised); color: var(--ink-soft);
+    font-size: 14.5px; line-height: 1.55;
+  }
+  .number-grid .item::before {
+    content: counter(item, decimal-leading-zero); font-family: var(--mono); color: var(--accent);
+    font-size: 11px; font-weight: 700; padding-top: 2px;
+  }
+  .number-grid .item strong { color: var(--ink); }
+  .status-note {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--hair);
+    border: 1px solid var(--hair); border-radius: 10px; overflow: hidden; margin-top: 24px;
+  }
+  .status-note > div { background: var(--paper-raised); padding: 18px 20px; }
+  .status-note .k {
+    display: block; font-family: var(--mono); font-size: 10px; letter-spacing: .08em;
+    color: var(--ink-faint); text-transform: uppercase; margin-bottom: 5px;
+  }
+  .status-note .v { color: var(--ink); font-size: 14px; line-height: 1.5; }
+  @media (max-width: 720px) {
+    .detail-grid, .number-grid, .status-note { grid-template-columns: 1fr; }
+  }
+
+  /* ---------- the divergence diagram ---------- */
+  .diagram-band {
+    background: var(--paper-raised);
+    border: 1px solid var(--hair);
+    border-radius: 14px;
+    padding: 38px 34px 34px;
+    margin-top: 8px;
+  }
+  .diagram-title {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--ink-faint); margin: 0 0 30px;
+    text-align: center;
+  }
+  .lanes { display: grid; gap: 30px; }
+  .lane { display: grid; grid-template-columns: 190px 1fr; gap: 22px; align-items: center; }
+  .lane-label { }
+  .lane-label .name { font-weight: 640; font-size: 15px; margin: 0 0 4px; }
+  .lane-label .desc { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); line-height: 1.4; }
+  .lane-label .badge {
+    display: inline-block; margin-top: 8px; font-family: var(--mono);
+    font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 3px 8px; border-radius: 20px; font-weight: 600;
+  }
+  .badge.enforce { background: var(--valid-soft); color: var(--valid); }
+  .badge.late { background: var(--danger-soft); color: var(--danger); }
+
+  .chain { display: flex; align-items: center; gap: 0; flex-wrap: wrap; }
+  .blk {
+    position: relative; min-width: 62px; height: 54px; border-radius: 8px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-family: var(--mono); border: 1.5px solid var(--hair-strong);
+    background: var(--paper); flex: 0 0 auto;
+  }
+  .blk .h { font-size: 9px; color: var(--ink-faint); letter-spacing: 0.04em; }
+  .blk .id { font-size: 14px; font-weight: 700; color: var(--ink); }
+  .blk.ok { border-color: var(--valid); background: var(--valid-soft); }
+  .blk.ok .id { color: var(--valid); }
+  .blk.bad {
+    border-color: var(--danger); background: var(--danger-soft);
+    border-style: solid;
+  }
+  .blk.bad .id { color: var(--danger); }
+  .blk.rejected {
+    border-style: dashed; opacity: 0.55; background: transparent;
+  }
+  .blk.rejected .id { color: var(--danger); text-decoration: line-through; }
+  .link {
+    width: 22px; height: 1.5px; background: var(--hair-strong); flex: 0 0 auto;
+  }
+  .link.dead {
+    background: repeating-linear-gradient(90deg, var(--danger) 0 4px, transparent 4px 8px);
+  }
+  .chain-note {
+    font-family: var(--mono); font-size: 11px; margin-left: 12px;
+    align-self: center; padding: 4px 0;
+  }
+  .chain-note.reject { color: var(--danger); }
+  .chain-note.accept { color: var(--valid); }
+  @media (max-width: 640px) {
+    .lane { grid-template-columns: 1fr; gap: 12px; }
+    .chain { justify-content: flex-start; }
+  }
+
+  .legend {
+    display: flex; gap: 24px; flex-wrap: wrap; justify-content: center;
+    margin-top: 34px; padding-top: 24px; border-top: 1px solid var(--hair);
+  }
+  .legend .item { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11px; color: var(--ink-soft); }
+  .legend .sw { width: 26px; height: 16px; border-radius: 4px; border: 1.5px solid; flex: 0 0 auto; }
+  .legend .sw.ok { border-color: var(--valid); background: var(--valid-soft); }
+  .legend .sw.bad { border-color: var(--danger); background: var(--danger-soft); }
+  .legend .sw.rej { border-color: var(--danger); border-style: dashed; background: transparent; }
+
+  /* ---------- fragmentation fan-out ---------- */
+  .fanout { margin-top: 8px; }
+  .fan-source { display: flex; justify-content: center; margin-bottom: 6px; }
+  .fan-source .srcblk {
+    display: flex; align-items: center; gap: 12px; padding: 14px 22px;
+    border: 1.5px solid var(--hair-strong); border-radius: 10px; background: var(--paper-raised);
+    font-family: var(--mono); font-size: 13px; color: var(--ink-soft); text-align: center;
+  }
+  .fan-source .srcblk strong { color: var(--ink); }
+  .fan-stem { display: flex; justify-content: center; }
+  .fan-stem::before { content: ""; width: 1.5px; height: 26px; background: var(--hair-strong); }
+  .fan-branches {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
+    position: relative; padding-top: 22px;
+  }
+  /* connector rail across the top of the branches */
+  .fan-branches::before {
+    content: ""; position: absolute; top: 0; left: 12.5%; right: 12.5%;
+    height: 1.5px; background: var(--hair-strong);
+  }
+  .fan-branch { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0; }
+  .fan-branch::before {
+    content: ""; position: absolute; top: -22px; left: 50%; width: 1.5px; height: 22px;
+    background: var(--danger); transform: translateX(-50%);
+  }
+  .fan-branch.valid::before { background: var(--valid); }
+  .fan-col { display: flex; flex-direction: column; align-items: center; gap: 0; }
+  .fan-col .miniblk {
+    width: 100%; max-width: 96px; padding: 8px 6px; border-radius: 7px;
+    border: 1.5px solid var(--hair-strong); background: var(--paper);
+    font-family: var(--mono); text-align: center;
+  }
+  .fan-col .conn { width: 1.5px; height: 12px; background: var(--hair-strong); }
+  .fan-col .miniblk .mh { display: block; font-size: 8.5px; color: var(--ink-faint); letter-spacing: 0.04em; }
+  .fan-col .miniblk .mid { display: block; font-size: 12px; font-weight: 700; color: var(--ink); }
+  .fan-col .miniblk.bad { border-color: var(--danger); background: var(--danger-soft); }
+  .fan-col .miniblk.bad .mid { color: var(--danger); }
+  .fan-col .miniblk.tip { border-style: dashed; }
+  .fan-branch.valid .fan-col .miniblk.ok { border-color: var(--valid); background: var(--valid-soft); }
+  .fan-branch.valid .fan-col .miniblk.ok .mid { color: var(--valid); }
+  .fan-tag {
+    margin-top: 10px; font-family: var(--mono); font-size: 10px; line-height: 1.4;
+    color: var(--ink-soft); text-align: center; max-width: 15ch;
+  }
+  .fan-tag .badge-mini {
+    display: inline-block; font-weight: 700; font-size: 9.5px; letter-spacing: 0.04em;
+    padding: 2px 7px; border-radius: 12px; margin-bottom: 5px; text-transform: uppercase;
+  }
+  .fan-branch .badge-mini { background: var(--danger-soft); color: var(--danger); }
+  .fan-branch.valid .badge-mini { background: var(--valid-soft); color: var(--valid); }
+  .fan-count {
+    display: flex; align-items: baseline; justify-content: center; gap: 14px;
+    margin-top: 30px; padding-top: 24px; border-top: 1px solid var(--hair);
+    flex-wrap: wrap; text-align: center;
+  }
+  .fan-count .big {
+    font-family: var(--sans); font-weight: 760; font-size: clamp(2.2rem, 5vw, 3.2rem);
+    letter-spacing: -0.03em; color: var(--danger); line-height: 1;
+  }
+  .fan-count .cap { font-size: 14px; color: var(--ink-soft); max-width: 46ch; text-align: left; }
+  @media (max-width: 720px) {
+    .fan-branches { grid-template-columns: repeat(2, 1fr); row-gap: 34px; }
+    .fan-branches::before { display: none; }
+    .fan-branch::before { display: none; }
+  }
+
+  /* ---------- steps ---------- */
+  .steps { display: grid; gap: 0; counter-reset: step; margin-top: 8px; }
+  .step {
+    display: grid; grid-template-columns: 42px 1fr; gap: 20px;
+    padding: 22px 0; border-top: 1px solid var(--hair);
+  }
+  .step:last-child { border-bottom: 1px solid var(--hair); }
+  .step .n {
+    counter-increment: step; font-family: var(--mono); font-size: 13px;
+    font-weight: 700; color: var(--accent);
+  }
+  .step .n::before { content: counter(step, decimal-leading-zero); }
+  .step .body h4 { margin: 0 0 5px; font-size: 15.5px; font-weight: 640; }
+  .step .body p { margin: 0; color: var(--ink-soft); font-size: 15px; }
+
+  /* ---------- comparison table ---------- */
+  .tablewrap { overflow-x: auto; margin-top: 8px; border: 1px solid var(--hair); border-radius: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+  thead th {
+    text-align: left; font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--ink-faint); font-weight: 600;
+    padding: 14px 18px; background: var(--paper-raised); border-bottom: 1px solid var(--hair-strong);
+    white-space: nowrap;
+  }
+  tbody td { padding: 14px 18px; border-bottom: 1px solid var(--hair); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  td .tag { font-family: var(--mono); font-size: 12px; font-weight: 600; }
+  td .tag.ok { color: var(--valid); }
+  td .tag.bad { color: var(--danger); }
+  code.reason {
+    background: var(--danger-soft); color: var(--danger); font-size: 0.82em;
+  }
+
+  /* ---------- root cause code block ---------- */
+  .codeblock {
+    background: var(--code-bg); border: 1px solid var(--hair); border-radius: 12px;
+    padding: 22px 24px; margin-top: 8px; overflow-x: auto;
+    font-family: var(--mono); font-size: 13.5px; line-height: 1.6; color: var(--code-ink);
+  }
+  .codeblock .cmt { color: var(--ink-faint); }
+  .codeblock .kw { color: var(--accent); }
+
+  /* ---------- callout ---------- */
+  .callout {
+    border-left: 3px solid var(--accent); background: var(--accent-soft);
+    padding: 18px 22px; border-radius: 0 10px 10px 0; margin-top: 20px;
+  }
+  .callout p { margin: 0; font-size: 15px; }
+  .callout .lbl {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--accent); font-weight: 700;
+    display: block; margin-bottom: 8px;
+  }
+
+  /* ---------- pieces / mechanism grid ---------- */
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 8px; }
+  .card {
+    background: var(--paper-raised); border: 1px solid var(--hair); border-radius: 12px;
+    padding: 22px;
+  }
+  .card .icon {
+    font-family: var(--mono); font-size: 12px; color: var(--accent);
+    font-weight: 700; margin-bottom: 12px; letter-spacing: 0.05em;
+  }
+  .card h4 { margin: 0 0 8px; font-size: 15px; font-weight: 640; }
+  .card p { margin: 0; font-size: 13.5px; color: var(--ink-soft); line-height: 1.55; }
+  .card code { font-size: 0.8em; }
+  @media (max-width: 820px) { .cards { grid-template-columns: 1fr; } }
+
+  /* segwit contrast table */
+  .contrast { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin-top: 8px;
+    border: 1px solid var(--hair); border-radius: 12px; overflow: hidden; }
+  .contrast .col { padding: 0; }
+  .contrast .colhead {
+    padding: 16px 22px; font-family: var(--mono); font-size: 12px; font-weight: 700;
+    letter-spacing: 0.04em; border-bottom: 1px solid var(--hair);
+  }
+  .contrast .col.seg .colhead { background: var(--valid-soft); color: var(--valid); }
+  .contrast .col.rdts .colhead { background: var(--danger-soft); color: var(--danger); }
+  .contrast .col.rdts { border-left: 1px solid var(--hair); }
+  .contrast .row { padding: 16px 22px; border-bottom: 1px solid var(--hair); font-size: 13.5px; }
+  .contrast .row:last-child { border-bottom: none; }
+  .contrast .row .rl {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--ink-faint); display: block; margin-bottom: 5px;
+  }
+  .contrast .col.seg .row strong { color: var(--valid); }
+  .contrast .col.rdts .row strong { color: var(--danger); }
+  @media (max-width: 640px) {
+    .contrast { grid-template-columns: 1fr; }
+    .contrast .col.rdts { border-left: none; border-top: 1px solid var(--hair-strong); }
+  }
+
+  /* ---------- impact split ---------- */
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 8px; }
+  .panel { border-radius: 12px; padding: 24px; border: 1px solid var(--hair); }
+  .panel.can { background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 30%, transparent); }
+  .panel.cannot { background: var(--valid-soft); border-color: color-mix(in srgb, var(--valid) 30%, transparent); }
+  .panel h4 {
+    margin: 0 0 16px; font-size: 13px; font-family: var(--mono); letter-spacing: 0.05em;
+    text-transform: uppercase; display: flex; align-items: center; gap: 8px;
+  }
+  .panel.can h4 { color: var(--danger); }
+  .panel.cannot h4 { color: var(--valid); }
+  .panel ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 12px; }
+  .panel li { font-size: 14px; line-height: 1.5; padding-left: 22px; position: relative; color: var(--ink); }
+  .panel.can li::before { content: "→"; position: absolute; left: 0; color: var(--danger); font-family: var(--mono); }
+  .panel.cannot li::before { content: "✕"; position: absolute; left: 0; color: var(--valid); font-family: var(--mono); font-size: 12px; }
+  @media (max-width: 720px) { .split { grid-template-columns: 1fr; } }
+
+  /* ---------- fix options ---------- */
+  .options { display: grid; gap: 16px; margin-top: 8px; }
+  .option {
+    border: 1px solid var(--hair); border-radius: 12px; padding: 24px;
+    background: var(--paper-raised); display: grid; grid-template-columns: auto 1fr; gap: 22px;
+  }
+  .option .tag {
+    font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--accent);
+    letter-spacing: 0.04em; white-space: nowrap;
+  }
+  .option h4 { margin: 0 0 6px; font-size: 16px; font-weight: 640; }
+  .option p { margin: 0; font-size: 14px; color: var(--ink-soft); }
+  @media (max-width: 640px) { .option { grid-template-columns: 1fr; gap: 8px; } }
+
+  /* ---------- mitigation ---------- */
+  .mitig-cmd {
+    background: var(--code-bg); border: 1px solid var(--hair); border-radius: 10px;
+    padding: 16px 20px; font-family: var(--mono); font-size: 13.5px; color: var(--code-ink);
+    overflow-x: auto; margin-top: 16px;
+  }
+  .mitig-cmd .prompt { color: var(--accent); user-select: none; }
+
+  /* ---------- reproducer procedures ---------- */
+  .repro { display: grid; gap: 26px; margin-top: 8px; }
+  .repro-card {
+    border: 1px solid var(--hair); border-radius: 14px; overflow: hidden;
+    background: var(--paper-raised);
+  }
+  .repro-head {
+    display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+    padding: 20px 26px; border-bottom: 1px solid var(--hair);
+  }
+  .repro-head .rid {
+    font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--accent);
+    letter-spacing: 0.06em;
+  }
+  .repro-head h3 { margin: 0; font-size: 17px; font-weight: 640; }
+  .repro-head .rtag {
+    margin-left: auto; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.05em;
+    text-transform: uppercase; padding: 3px 9px; border-radius: 20px; font-weight: 600;
+    background: var(--danger-soft); color: var(--danger); white-space: nowrap;
+  }
+  .repro-body { padding: 24px 26px; display: grid; gap: 22px; }
+  .repro-body .blabel {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 0 0 10px; display: block;
+  }
+  ol.proc { margin: 0; padding: 0; list-style: none; counter-reset: p; display: grid; gap: 9px; }
+  ol.proc li {
+    counter-increment: p; position: relative; padding-left: 30px; font-size: 14.5px;
+    line-height: 1.5; color: var(--ink);
+  }
+  ol.proc li::before {
+    content: counter(p); position: absolute; left: 0; top: 0.05em;
+    font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--accent);
+    width: 20px; height: 20px; border: 1px solid var(--hair-strong); border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; line-height: 1;
+  }
+
+  /* terminal panel */
+  .term {
+    background: var(--code-bg); border: 1px solid var(--hair); border-radius: 10px;
+    overflow: hidden;
+  }
+  .term-bar {
+    display: flex; align-items: center; gap: 7px; padding: 9px 14px;
+    border-bottom: 1px solid var(--hair);
+  }
+  .term-bar .d { width: 10px; height: 10px; border-radius: 50%; background: var(--hair-strong); }
+  .term-bar .t {
+    margin-left: 8px; font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint);
+    letter-spacing: 0.04em;
+  }
+  .term pre {
+    margin: 0; padding: 16px 18px; overflow-x: auto;
+    font-family: var(--mono); font-size: 13px; line-height: 1.65; color: var(--code-ink);
+  }
+  .term pre .cmt { color: var(--ink-faint); }
+  .term pre .up { color: var(--danger); }
+  .term pre .fr { color: var(--valid); }
+  .term pre .ok { color: var(--valid); font-weight: 600; }
+
+  /* ---------- source code panel ---------- */
+  .src {
+    border-radius: 12px; overflow: hidden; border: 1px solid var(--hair);
+    background: var(--code-bg);
+  }
+  .src-head {
+    display: flex; align-items: center; gap: 10px; padding: 11px 16px;
+    border-bottom: 1px solid var(--hair); background: var(--paper-raised);
+  }
+  .src-head .file {
+    font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--ink);
+    word-break: break-all;
+  }
+  .src-head .fn {
+    margin-left: auto; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.04em;
+    text-transform: uppercase; padding: 2px 8px; border-radius: 5px; white-space: nowrap;
+    background: var(--code-bg); color: var(--ink-faint);
+  }
+  .src-head .fn.present { background: var(--valid-soft); color: var(--valid); }
+  .src-head .fn.absent  { background: var(--danger-soft); color: var(--danger); }
+  .code {
+    margin: 0; overflow-x: auto; padding: 14px 0;
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.7; color: var(--code-ink);
+    counter-reset: ln;
+  }
+  .code .cl { display: block; padding: 0 18px 0 0; white-space: pre; }
+  .code .cl::before {
+    content: counter(ln); counter-increment: ln;
+    display: inline-block; width: 3.2em; padding-right: 1.4em; margin-right: 1em;
+    text-align: right; color: var(--ink-faint); opacity: 0.55;
+    border-right: 1px solid var(--hair); user-select: none;
+  }
+  .code .cl.hi { background: var(--accent-soft); }
+  .code .cl.hi-ok { background: var(--valid-soft); }
+  .code .cl.hi-bad { background: var(--danger-soft); }
+  .code .kw { color: var(--accent); }
+  .code .cm { color: var(--ink-faint); font-style: italic; }
+  .code .st { color: var(--valid); }
+  .code .fu { color: var(--ink); font-weight: 600; }
+  .code .cl.add {
+    background: var(--valid-soft);
+    box-shadow: inset 3px 0 0 var(--valid);
+  }
+  .code .cl.add::after { content: ""; }
+  .src-head .fn.shipped { background: var(--valid-soft); color: var(--valid); }
+
+  /* fix mapping table: report requirement → shipped code */
+  .maprow td:first-child { width: 44%; }
+  .maprow .done {
+    display: inline-flex; align-items: center; gap: 7px; font-family: var(--mono);
+    font-size: 12px; font-weight: 600; color: var(--valid);
+  }
+  .maprow .done::before {
+    content: "✓"; display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; border-radius: 50%; background: var(--valid-soft);
+    color: var(--valid); font-size: 10px; flex: 0 0 auto;
+  }
+  .maprow code { font-size: 0.82em; }
+
+  /* the three-piece guard comparison */
+  .guard { display: grid; gap: 20px; margin-top: 8px; }
+  .guard-piece {
+    border: 1px solid var(--hair); border-radius: 16px; overflow: hidden;
+    background: var(--paper-raised);
+  }
+  .guard-piece > .gp-head {
+    display: grid; grid-template-columns: 46px 1fr auto; gap: 16px; align-items: center;
+    padding: 18px 24px; border-bottom: 1px solid var(--hair);
+  }
+  .gp-head .gp-n {
+    font-family: var(--mono); font-size: 15px; font-weight: 700; color: var(--accent);
+    width: 46px; height: 46px; border: 1.5px solid var(--hair-strong); border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .gp-head .gp-t h3 { margin: 0 0 3px; font-size: 17px; font-weight: 640; }
+  .gp-head .gp-t p { margin: 0; font-size: 13px; color: var(--ink-soft); }
+  .gp-status {
+    display: flex; gap: 8px; align-items: center; font-family: var(--mono);
+    font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .gp-status .yes { color: var(--valid); }
+  .gp-status .no { color: var(--danger); }
+  .gp-status .arrow { color: var(--ink-faint); }
+  .gp-cols { display: grid; grid-template-columns: 1fr 1fr; }
+  .gp-col { padding: 22px 24px; }
+  .gp-col.seg { border-right: 1px solid var(--hair); }
+  .gp-col .cl-head {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase;
+    font-weight: 700; margin: 0 0 14px; display: flex; align-items: center; gap: 8px;
+  }
+  .gp-col.seg .cl-head { color: var(--valid); }
+  .gp-col.rdts .cl-head { color: var(--danger); }
+  .gp-col .cl-head .badge-dot { width: 9px; height: 9px; border-radius: 50%; }
+  .gp-col.seg .cl-head .badge-dot { background: var(--valid); }
+  .gp-col.rdts .cl-head .badge-dot { background: var(--danger); }
+  .gp-absent {
+    display: flex; flex-direction: column; gap: 12px; justify-content: center;
+    min-height: 120px; padding: 8px 0;
+  }
+  .gp-absent .big {
+    font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--danger);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .gp-absent .big::before {
+    content: "∅"; font-size: 22px; line-height: 1;
+  }
+  .gp-absent p { margin: 0; font-size: 13.5px; color: var(--ink-soft); line-height: 1.55; }
+  @media (max-width: 780px) {
+    .gp-cols { grid-template-columns: 1fr; }
+    .gp-col.seg { border-right: none; border-bottom: 1px solid var(--hair-strong); }
+    .gp-head { grid-template-columns: 40px 1fr; }
+    .gp-status { grid-column: 1 / -1; }
+  }
+
+  .observed {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid var(--hair);
+    border-radius: 10px; overflow: hidden;
+  }
+  .observed .o {
+    padding: 16px 18px; font-size: 14px; line-height: 1.5;
+  }
+  .observed .o.up { background: var(--danger-soft); border-right: 1px solid var(--hair); }
+  .observed .o.fr { background: var(--valid-soft); }
+  .observed .o .ol {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+    font-weight: 700; display: block; margin-bottom: 6px;
+  }
+  .observed .o.up .ol { color: var(--danger); }
+  .observed .o.fr .ol { color: var(--valid); }
+  @media (max-width: 560px) {
+    .observed { grid-template-columns: 1fr; }
+    .observed .o.up { border-right: none; border-bottom: 1px solid var(--hair); }
+  }
+
+  /* ---------- reachability / math ---------- */
+  .mathrow {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px;
+    background: var(--hair); border: 1px solid var(--hair); border-radius: 10px;
+    overflow: hidden; margin-top: 8px;
+  }
+  .mathrow.six { grid-template-columns: repeat(6, 1fr); }
+  .mathrow .p { background: var(--paper-raised); padding: 16px 16px; }
+  .mathrow .p .pk {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 0 0 7px;
+  }
+  .mathrow .p .pv { font-family: var(--mono); font-size: 16px; font-weight: 700; color: var(--ink); }
+  @media (max-width: 720px) { .mathrow, .mathrow.six { grid-template-columns: repeat(2, 1fr); } }
+
+  .formula {
+    background: var(--code-bg); border: 1px solid var(--hair); border-radius: 12px;
+    padding: 24px 26px; margin-top: 20px; font-family: var(--mono); font-size: 14px;
+    line-height: 1.9; color: var(--code-ink); overflow-x: auto;
+  }
+  .formula .hl { color: var(--accent); font-weight: 700; }
+  .formula .cmt { color: var(--ink-faint); }
+  .formula .range { color: var(--danger); font-weight: 700; }
+
+  .snapshot {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 20px;
+  }
+  .snapshot .s { border: 1px solid var(--hair); border-radius: 12px; padding: 20px; background: var(--paper-raised); }
+  .snapshot .s .sk {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 0 0 8px;
+  }
+  .snapshot .s .sv { font-size: 15px; font-weight: 640; color: var(--ink); font-family: var(--mono); }
+  .snapshot .s .sv.state { color: var(--accent); }
+  .snapshot .s .sd { font-size: 12.5px; color: var(--ink-soft); margin: 8px 0 0; line-height: 1.5; }
+  @media (max-width: 720px) { .snapshot { grid-template-columns: 1fr; } }
+
+  /* ---------- code reference list ---------- */
+  .reflist { display: grid; gap: 0; margin-top: 8px; border: 1px solid var(--hair); border-radius: 12px; overflow: hidden; }
+  .refgroup-head {
+    padding: 14px 20px; background: var(--paper-raised); border-bottom: 1px solid var(--hair-strong);
+    font-weight: 640; font-size: 14.5px; display: flex; align-items: center; gap: 10px;
+  }
+  .refgroup-head .gn {
+    font-family: var(--mono); font-size: 11px; color: var(--accent); font-weight: 700;
+  }
+  .refrow {
+    display: grid; grid-template-columns: 260px 1fr; gap: 20px;
+    padding: 13px 20px; border-bottom: 1px solid var(--hair); align-items: baseline;
+  }
+  .refrow:last-child { border-bottom: none; }
+  .refrow .loc {
+    font-family: var(--mono); font-size: 12.5px; color: var(--ink);
+    background: var(--code-bg); padding: 3px 8px; border-radius: 5px; justify-self: start;
+    word-break: break-all;
+  }
+  .refrow .what { font-size: 14px; color: var(--ink-soft); line-height: 1.5; }
+  @media (max-width: 640px) { .refrow { grid-template-columns: 1fr; gap: 6px; } }
+
+  /* audit confidence matrix */
+  td .vs {
+    display: inline-flex; align-items: center; gap: 7px; font-family: var(--mono);
+    font-size: 12px; font-weight: 600;
+  }
+  td .vs::before { content: ""; width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+  td .vs.repro { color: var(--valid); }
+  td .vs.repro::before { background: var(--valid); }
+  td .vs.verif { color: var(--accent); }
+  td .vs.verif::before { background: var(--accent); }
+  td .vs.source { color: var(--ink-faint); }
+  td .vs.source::before { background: var(--ink-faint); }
+
+  /* ---------- footer ---------- */
+  footer { padding: 56px 0 72px; }
+  footer .disc {
+    font-size: 13px; color: var(--ink-faint); font-family: var(--mono); line-height: 1.7;
+    max-width: 72ch;
+  }
+  footer .rootcause {
+    border: 1px solid var(--hair-strong); border-radius: 12px; padding: 28px 30px;
+    margin-bottom: 40px; background: var(--paper-raised);
+  }
+  footer .rootcause .lbl {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--accent); font-weight: 700; display: block; margin-bottom: 14px;
+  }
+  footer .rootcause p {
+    margin: 0; font-size: 16px; line-height: 1.6; color: var(--ink);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    html { scroll-behavior: smooth; }
+    .blk { transition: transform .2s ease; }
+  }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+
+  @media print {
+    :root {
+      color-scheme: light;
+      --paper: #fff; --paper-raised: #fff; --ink: #111; --ink-soft: #333;
+      --ink-faint: #555; --hair: #ccc; --hair-strong: #aaa; --code-bg: #f2f2f2;
+      --code-ink: #111;
+    }
+    body { font-size: 11pt; }
+    header.topbar { position: static; backdrop-filter: none; }
+    .topnav { display: none; }
+    .hero { padding-top: 48px; }
+    section { padding: 40px 0; }
+    .wrap { max-width: none; padding: 0 18px; }
+    .repro-card, .detail-box, .callout, .src, .option, .panel, .rootcause,
+    .tablewrap, .guard-piece { break-inside: avoid; }
+    a { color: inherit; }
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap">
+    <span class="brand">Block<span class="dot">·</span>Slop</span>
+    <nav class="topnav" aria-label="Report sections">
+      <a href="#what">Gap</a>
+      <a href="#how">Divergence</a>
+      <a href="#repro">Reproducers</a>
+      <a href="#recovery">Recovery</a>
+      <a href="#cause">Root cause</a>
+      <a href="#refs">Code refs</a>
+      <a href="#mainnet">Mainnet</a>
+      <a href="#fix">Fix</a>
+      <a href="#patch">Patch</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap">
+      <p class="eyebrow">Consensus &amp; upgrade-path correctness</p>
+      <h1>BlockSlop</h1>
+      <p class="tagline"><span class="tagline-main">Same rules. Same block.</span><span class="tagline-emphasis">Different answer.</span></p>
+      <p class="lede prose">
+        A late-upgraded node keeps a block that a fresh BIP110 node rejects.
+      </p>
+
+      <div class="herolinks">
+        <a class="btn primary" href="https://github.com/DathonPwn/bitcoin/pull/1">
+          <span class="ic">⬈</span> View the proposed fix · PR&nbsp;#1
+        </a>
+        <a class="btn ghost" href="#patch">Jump to the patch</a>
+      </div>
+
+      <div class="metastrip">
+        <div class="cell">
+          <p class="k">Affected</p>
+          <p class="v">Knots v29.3.knots20260508</p>
+        </div>
+        <div class="cell">
+          <p class="k">Commit</p>
+          <p class="v">f41f01e1e6de7025d52a865bef97f2a67277f0f3</p>
+        </div>
+        <div class="cell">
+          <p class="k">Status</p>
+          <p class="v">Reproduced on regtest</p>
+        </div>
+        <div class="cell">
+          <p class="k">Report date</p>
+          <p class="v">2026-07-17</p>
+        </div>
+        <div class="cell">
+          <p class="k">Classification</p>
+          <p class="v">Consensus / upgrade path</p>
+        </div>
+        <div class="cell">
+          <p class="k">Audit scope</p>
+          <p class="v">Regtest + source review</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- WHAT -->
+  <section id="what">
+    <div class="wrap">
+      <div class="sectionhead prose">
+        <span class="num">01 / The gap</span>
+        <h2>The same rules, two different chains.</h2>
+        <p class="sub">
+          BIP110 validation runs inside <code>ConnectBlock()</code>. But an ordinary restart loads the
+          existing UTXO chainstate and <em>trusts</em> its persisted tip and validity flags — it never
+          reconnects those blocks. There is no BIP110 equivalent of the SegWit upgrade guard.
+        </p>
+      </div>
+
+      <div class="prose">
+        <p>
+          The effective treatment of an already-connected block depends on the <strong>history of the
+          datadir</strong>, not on the block sequence and the node's current rules alone. Two nodes running
+          identical enforcing rules can therefore disagree about the active chain:
+        </p>
+      </div>
+
+      <div class="tablewrap">
+        <table aria-label="History-dependent treatment of the same block">
+          <thead>
+            <tr><th>Node</th><th>Datadir history</th><th>Result for the same historical block</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Late-upgraded enforcing node</td>
+              <td>Block connected while RDTS was <strong>disabled</strong></td>
+              <td><span class="tag bad">Retained</span> — stays in the active chain</td>
+            </tr>
+            <tr>
+              <td>Fresh enforcing node</td>
+              <td>Block first connected while RDTS was <strong>enabled</strong></td>
+              <td><span class="tag ok">Rejected</span> — never enters the chain</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="detail-block prose">
+        <h3 class="minihead">Affected transitions</h3>
+        <p>
+          The demonstrated transition is from a build that accepts legacy rules to a BIP110-enforcing
+          build while reusing a compatible datadir. In this checkout, non-enforcing mainnet mode changes
+          <code>DEPLOYMENT_REDUCED_DATA</code> to <code>NEVER_ACTIVE</code> and disables its deadline;
+          enforcing mode restores the hardcoded deployment parameters. Both modes use the same network
+          and database formats, so the later build loads the earlier block index and chainstate.
+        </p>
+      </div>
+      <div class="detail-grid">
+        <div class="detail-box">
+          <h4>Directly demonstrated</h4>
+          <p>Datadir reuse between separately compiled <code>RDTS_CONSENT=IMPLICIT</code> and <code>RDTS_CONSENT=UNSUPPORTED_UNSAFE_NO_ENFORCEMENT</code> binaries from the audited commit.</p>
+        </div>
+        <div class="detail-box">
+          <h4>Core and non-enforcing Knots</h4>
+          <p>The affected source history is not Knots-specific. A compatible datadir advanced by Bitcoin Core or by Knots without BIP110 enforcement can accept non-signaling or otherwise BIP110-invalid blocks and enter the same late-upgrade condition. If the activation client later opens it without rebuilding, those applicable blocks may be trusted without ever receiving BIP110 validation. Compatibility across arbitrary versions remains version-dependent.</p>
+        </div>
+        <div class="detail-box">
+          <h4>Other affected histories</h4>
+          <p>Temporarily downgrading to non-enforcing software, re-enabling enforcement later, or otherwise loading a chainstate advanced by software that did not enforce BIP110.</p>
+        </div>
+        <div class="detail-box">
+          <h4>Unaffected history</h4>
+          <p>A node that enforced BIP110 before it first connected every applicable block rejects violations normally and is not induced by this issue to accept them later.</p>
+        </div>
+      </div>
+
+      <div class="detail-block prose">
+        <h3 class="minihead">Required preconditions</h3>
+        <p>All four conditions must hold. No malformed database, local file write, or RPC access is required.</p>
+      </div>
+      <div class="number-grid">
+        <div class="item"><span><strong>Legacy connection.</strong> The node connects a block while its software or configuration does not enforce BIP110.</span></div>
+        <div class="item"><span><strong>Applicable violation.</strong> At that height and ancestry, BIP110 would reject the block for mandatory signaling or an active RDTS rule.</span></div>
+        <div class="item"><span><strong>Persisted state.</strong> The block obtains enough proof of work to be followed, and the node persists its UTXO chainstate and block-validity flags.</span></div>
+        <div class="item"><span><strong>Late enforcement.</strong> The operator starts an enforcing client on the same datadir without rebuilding or fully reconnecting the chainstate.</span></div>
+      </div>
+
+      <div class="detail-block prose">
+        <h3 class="minihead">Expected versus actual startup contract</h3>
+      </div>
+      <div class="tablewrap">
+        <table aria-label="Expected and observed startup behavior">
+          <thead><tr><th>Expected safe behavior</th><th>Observed behavior</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>Prove that every applicable block was connected under the enforcing rules, reconnect it, or refuse startup and require a rebuild/redownload.</td>
+              <td>Startup opens the coins database, accepts its recorded tip and block-index validity, checks six blocks at level 3, and becomes operational without reconnecting inherited blocks.</td>
+            </tr>
+            <tr>
+              <td>Current enforcement state and accepted history agree.</td>
+              <td>The node enforces BIP110 on newly connected descendants while continuing from a historical state that those rules could not have produced.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout">
+        <span class="lbl">Scope: a concrete late-soft-fork upgrade gap</span>
+        <p>
+          Persisted Bitcoin block validity is generally not namespaced by software version or by a complete
+          consensus-ruleset identifier, so this shape is not necessarily unique to BIP110. BIP110 makes it
+          concrete because enforcing and explicitly non-enforcing modes share database formats and users may
+          enable enforcement on an existing datadir. This report establishes the BIP110 transition failure;
+          it does not claim that every possible late soft-fork upgrade is promised to recover automatically.
+        </p>
+      </div>
+
+      <div class="status-note">
+        <div><span class="k">Finding status</span><span class="v">Dynamically reproduced; technical behavior confirmed.</span></div>
+        <div><span class="k">Classification remains policy-sensitive</span><span class="v">Maintainers may treat the transition as a vulnerability, an unsupported upgrade path, or a release-engineering requirement.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW / DIAGRAM -->
+  <section id="how">
+    <div class="wrap">
+      <div class="sectionhead prose">
+        <span class="num">02 / Divergence</span>
+        <h2>How the split develops.</h2>
+        <p class="sub">
+          A legacy block <strong>B</strong> is valid under old rules but invalid under BIP110. Whether a
+          node keeps it depends entirely on when enforcement was turned on.
+        </p>
+      </div>
+
+      <div class="diagram-band">
+        <p class="diagram-title">Two nodes · identical current rules · same block B</p>
+        <div class="lanes">
+
+          <div class="lane">
+            <div class="lane-label">
+              <p class="name">Continuously enforcing</p>
+              <p class="desc">enforced BIP110 before connecting B</p>
+              <span class="badge enforce">rejects B</span>
+            </div>
+            <div class="chain">
+              <div class="blk ok"><span class="h">h1</span><span class="id">A</span></div>
+              <div class="link dead"></div>
+              <div class="blk rejected"><span class="h">h2</span><span class="id">B</span></div>
+              <span class="chain-note reject">bad-txns-vout-script-toolarge → follows the BIP110-valid branch</span>
+            </div>
+          </div>
+
+          <div class="lane">
+            <div class="lane-label">
+              <p class="name">Late-upgraded</p>
+              <p class="desc">connected B while enforcement was off, then upgraded</p>
+              <span class="badge late">retains B</span>
+            </div>
+            <div class="chain">
+              <div class="blk ok"><span class="h">h1</span><span class="id">A</span></div>
+              <div class="link"></div>
+              <div class="blk bad"><span class="h">h2</span><span class="id">B</span></div>
+              <div class="link"></div>
+              <div class="blk ok"><span class="h">h3</span><span class="id">C</span></div>
+              <div class="link"></div>
+              <div class="blk ok"><span class="h">h4</span><span class="id">D</span></div>
+              <span class="chain-note accept">upgrade · builds valid descendants on top of B</span>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="legend">
+          <div class="item"><span class="sw ok"></span> Valid &amp; connected</div>
+          <div class="item"><span class="sw bad"></span> BIP110-invalid, retained</div>
+          <div class="item"><span class="sw rej"></span> Rejected — never connected</div>
+        </div>
+      </div>
+
+      <div class="steps">
+        <div class="step"><span class="n"></span><div class="body">
+          <h4>A non-enforcing node accepts block B</h4>
+          <p>B has enough proof of work and is valid under legacy rules, but violates BIP110.</p>
+        </div></div>
+        <div class="step"><span class="n"></span><div class="body">
+          <h4>A continuously enforcing node rejects B</h4>
+          <p>It stays on, or searches for, a BIP110-valid branch instead.</p>
+        </div></div>
+        <div class="step"><span class="n"></span><div class="body">
+          <h4>The legacy node persists B and its descendants</h4>
+          <p>Block index and UTXO chainstate now record B as valid.</p>
+        </div></div>
+        <div class="step"><span class="n"></span><div class="body">
+          <h4>Its operator enables BIP110 on the same datadir</h4>
+          <p>Intending to enforce the new rules going forward.</p>
+        </div></div>
+        <div class="step"><span class="n"></span><div class="body">
+          <h4>Startup trusts the persisted validity state</h4>
+          <p>Default level-3 verification disconnects recent blocks but never reconnects them — B is retained without re-validation.</p>
+        </div></div>
+        <div class="step"><span class="n"></span><div class="body">
+          <h4>The node accepts new descendants on top of B</h4>
+          <p>Their own contents satisfy BIP110; B itself is never reconsidered.</p>
+        </div></div>
+      </div>
+
+      <div class="callout">
+        <span class="lbl">Not a chain split by itself</span>
+        <p>
+          This defect does not create block B or guarantee a persistent split. A sufficiently-worked
+          legacy-valid / BIP110-invalid block must first exist. What the defect does is prevent a normal
+          late upgrade from reliably <em>healing</em> that disagreement.
+        </p>
+      </div>
+
+      <!-- N-way fragmentation -->
+      <div class="prose" style="margin-top:56px;">
+        <h3 style="font-size:22px; font-weight:720; letter-spacing:-0.015em; margin:0 0 8px;">It isn't two chains. It's <em>N</em>.</h3>
+        <p style="color:var(--ink-soft); margin:0;">
+          The two-lane picture above understates the damage. There is no single "BlockSlop chain" set
+          against Bitcoin. Each late-upgraded node freezes in whatever BIP110-invalid history <em>its own
+          datadir</em> happened to hold — and different nodes saw different invalid blocks. The enforcing
+          network can therefore shatter into <strong>as many incompatible chains as there are distinct
+          pre-upgrade histories</strong>, all simultaneously claiming to enforce BIP110.
+        </p>
+      </div>
+
+      <div class="diagram-band" style="margin-top:24px;">
+        <p class="diagram-title">One legacy chain · many divergent enforcing chains</p>
+
+        <div class="fanout">
+          <div class="fan-source">
+            <div class="srcblk">
+              <span>legacy Bitcoin chain</span>
+              <strong>· accepts every legacy-valid block ·</strong>
+              <span>pre-upgrade history differs per node</span>
+            </div>
+          </div>
+          <div class="fan-stem"></div>
+
+          <div class="fan-branches">
+
+            <div class="fan-branch">
+              <div class="fan-col">
+                <div class="miniblk ok"><span class="mh">h_k</span><span class="mid">A</span></div>
+                <div class="conn"></div>
+                <div class="miniblk bad"><span class="mh">invalid</span><span class="mid">B₁</span></div>
+                <div class="conn"></div>
+                <div class="miniblk tip"><span class="mh">tip</span><span class="mid">···</span></div>
+              </div>
+              <div class="fan-tag"><span class="badge-mini">node group 1</span>frozen on ancestor B₁</div>
+            </div>
+
+            <div class="fan-branch">
+              <div class="fan-col">
+                <div class="miniblk ok"><span class="mh">h_k</span><span class="mid">A</span></div>
+                <div class="conn"></div>
+                <div class="miniblk bad"><span class="mh">invalid</span><span class="mid">B₂</span></div>
+                <div class="conn"></div>
+                <div class="miniblk tip"><span class="mh">tip</span><span class="mid">···</span></div>
+              </div>
+              <div class="fan-tag"><span class="badge-mini">node group 2</span>frozen on ancestor B₂</div>
+            </div>
+
+            <div class="fan-branch">
+              <div class="fan-col">
+                <div class="miniblk ok"><span class="mh">h_k</span><span class="mid">A</span></div>
+                <div class="conn"></div>
+                <div class="miniblk bad"><span class="mh">invalid</span><span class="mid">B₃</span></div>
+                <div class="conn"></div>
+                <div class="miniblk tip"><span class="mh">tip</span><span class="mid">···</span></div>
+              </div>
+              <div class="fan-tag"><span class="badge-mini">node group 3</span>frozen on ancestor B₃</div>
+            </div>
+
+            <div class="fan-branch valid">
+              <div class="fan-col">
+                <div class="miniblk ok"><span class="mh">h_k</span><span class="mid">A</span></div>
+                <div class="conn"></div>
+                <div class="miniblk ok"><span class="mh">valid</span><span class="mid">B✓</span></div>
+                <div class="conn"></div>
+                <div class="miniblk tip ok"><span class="mh">tip</span><span class="mid">···</span></div>
+              </div>
+              <div class="fan-tag"><span class="badge-mini">clean</span>continuously enforcing</div>
+            </div>
+
+          </div>
+
+          <div class="fan-count">
+            <span class="big">1 + N</span>
+            <span class="cap">
+              One clean enforcing chain, plus one distinct chain for every unique BIP110-invalid ancestor a
+              late-upgraded node happened to bury. Four branches shown; the real number is bounded only by
+              how many different invalid histories exist across the network.
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail-grid" style="margin-top:24px;">
+        <div class="detail-box">
+          <h4>Why it multiplies</h4>
+          <p>Provenance is per-datadir, not global. Two late-upgraded nodes that buried <em>different</em> invalid blocks each keep their own — and neither will reorg to the other, because both tips are "valid" under their own trusted history.</p>
+        </div>
+        <div class="detail-box">
+          <h4>Why they can't reconverge</h4>
+          <p>A normal reorg only happens toward more-worked chains a node considers valid. Each fragment already treats its buried ancestor as valid, so nothing forces it back to the clean chain — the split is sticky, not transient.</p>
+        </div>
+        <div class="detail-box">
+          <h4>Why it's worse than a classic fork</h4>
+          <p>A classic contentious fork yields two chains people can name and choose between. Here every fragment reports the <em>same</em> deployment as active, so operators believe they agree while their UTXO sets silently disagree.</p>
+        </div>
+        <div class="detail-box">
+          <h4>What bounds N</h4>
+          <p>The count is limited only by the number of distinct legacy-valid / BIP110-invalid histories that different nodes persisted before upgrading — not by any property of BIP110 itself.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- REPRODUCED -->
+  <section id="repro">
+    <div class="wrap">
+      <div class="sectionhead prose">
+        <span class="num">03 / Reproduced</span>
+        <h2>Three violations, all retained.</h2>
+        <p class="sub">
+          Confirmed on regtest with deployment overrides and two separately compiled binaries — one
+          enforcing, one not — reusing the same datadir. Each row: the upgraded node keeps the block;
+          a fresh enforcing node rejects it.
+        </p>
+      </div>
+
+      <div class="tablewrap">
+        <table aria-label="Reproduced BIP110 violations and rejection reasons">
+          <thead>
+            <tr><th>Phase tested</th><th>The offending block</th><th>Fresh node rejection reason</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Mandatory signaling</strong></td>
+              <td>A non-signaling block in the mandatory-signaling interval</td>
+              <td><code class="reason">bad-version-reduced_data</code></td>
+            </tr>
+            <tr>
+              <td><strong>Active RDTS transaction rule</strong></td>
+              <td>A 35-byte non-<code>OP_RETURN</code> output</td>
+              <td><code class="reason">bad-txns-vout-script-toolarge</code></td>
+            </tr>
+            <tr>
+              <td><strong>Active RDTS script rule</strong></td>
+              <td>A witness script revealing a 257-byte pushed element</td>
+              <td><code class="reason">Push value size limit exceeded</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout">
+        <span class="lbl">The rules themselves work</span>
+        <p>
+          Both fresh validation and <code>-reindex-chainstate</code> reject the test block correctly. The
+          defect is specifically the ordinary upgrade / startup path — not the BIP110 checks.
+        </p>
+      </div>
+
+      <div class="prose" style="margin-top:40px;">
+        <h3 style="font-family:var(--mono); font-size:13px; letter-spacing:0.06em; text-transform:uppercase; color:var(--ink-faint); margin:0 0 6px;">Test environment</h3>
+        <p style="color:var(--ink-soft); font-size:15px; margin:0;">
+          Clean regtest. Nodes disconnected; blocks submitted directly by RPC. The initial phase ran with
+          the separately compiled non-enforcing binary, the restart phase with the enforcing binary — so
+          the reproduction also proves datadir compatibility across the two compile-time consent modes.
+          Regtest <code>-vbparams</code> supplied deterministic never-active, always-active, and deadline
+          states. The reproducer is intentionally not registered in the default functional-test list and
+          is invoked directly against the configured build.
+        </p>
+      </div>
+      <div class="mathrow six" style="margin-top:20px;">
+        <div class="p"><p class="pk">Enforcing build</p><p class="pv" style="font-size:12.5px;">RDTS_CONSENT=IMPLICIT</p></div>
+        <div class="p"><p class="pk">Non-enforcing</p><p class="pv" style="font-size:10.5px;">RDTS_CONSENT=UNSUPPORTED_UNSAFE_NO_ENFORCEMENT</p></div>
+        <div class="p"><p class="pk">Checkout</p><p class="pv" style="font-size:11.5px;">v29.3.knots20260508</p></div>
+        <div class="p"><p class="pk">Commit</p><p class="pv" style="font-size:10.5px;">f41f01e1e6de7025d52a865bef97f2a67277f0f3</p></div>
+        <div class="p"><p class="pk">Chain</p><p class="pv" style="font-size:12.5px;">regtest</p></div>
+        <div class="p"><p class="pk">Reproducer</p><p class="pv" style="font-size:11px;">feature_bip110_late_upgrade_chainstate.py</p></div>
+      </div>
+
+      <div class="callout">
+        <span class="lbl">Safe, local reproduction scope</span>
+        <p>
+          The reproducer uses synthetic low-difficulty regtest blocks. It does not target mainnet, contact
+          peers, or provide a mainnet exploitation workflow. It covers mandatory signaling, active output
+          and script rules, default and level-4 startup, chainstate reindex recovery, and pruning.
+        </p>
+      </div>
+
+      <!-- Reproducer A -->
+      <div class="repro" style="margin-top:36px;">
+        <div class="repro-card">
+          <div class="repro-head">
+            <span class="rid">Reproducer A</span>
+            <h3>Active output-size rule</h3>
+            <span class="rtag">bad-txns-vout-script-toolarge</span>
+          </div>
+          <div class="repro-body">
+            <div>
+              <span class="blabel">Deployment overrides (–vbparams)</span>
+              <div class="term">
+                <div class="term-bar"><span class="d"></span><span class="d"></span><span class="d"></span><span class="t">vbparams · reduced_data</span></div>
+                <pre><span class="up">legacy/upgraded node:</span>  reduced_data:-2:9223372036854775807   <span class="cmt"># never active</span>
+<span class="fr">fresh control node:  </span>  reduced_data:-1:9223372036854775807   <span class="cmt"># always active</span></pre>
+              </div>
+            </div>
+            <div>
+              <span class="blabel">Procedure</span>
+              <ol class="proc">
+                <li>On the legacy node, submit a valid block at height 1.</li>
+                <li>Submit a height-2 block whose coinbase carries an extra 35-byte <code>scriptPubKey</code> that does <em>not</em> begin with <code>OP_RETURN</code>.</li>
+                <li>Submit a valid descendant at height 3.</li>
+                <li>Restart that same node / datadir with RDTS <strong>always active</strong>.</li>
+                <li>Confirm <code>getdeploymentinfo</code> reports <code>reduced_data.active = true</code> and the tip is still height 3.</li>
+                <li>Submit another valid descendant — accepted at height 4.</li>
+                <li>Feed the identical height-1 and height-2 blocks to the fresh always-active node.</li>
+              </ol>
+            </div>
+            <div>
+              <span class="blabel">Observed result</span>
+              <div class="observed">
+                <div class="o up"><span class="ol">Upgraded node</span>Retains the height-2 block and builds to height 4.</div>
+                <div class="o fr"><span class="ol">Fresh node</span>Rejects the height-2 block with <code class="reason">bad-txns-vout-script-toolarge</code>.</div>
+              </div>
+            </div>
+            <div>
+              <span class="blabel">Test-framework output</span>
+              <div class="term">
+                <div class="term-bar"><span class="d"></span><span class="d"></span><span class="d"></span><span class="t">functional test</span></div>
+                <pre><span class="ok">CONFIRMED:</span> upgraded enforcing node retains block; fresh enforcing node rejects it
+Tests successful</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Reproducer B -->
+        <div class="repro-card">
+          <div class="repro-head">
+            <span class="rid">Reproducer B</span>
+            <h3>Mandatory signaling</h3>
+            <span class="rtag">bad-version-reduced_data</span>
+          </div>
+          <div class="repro-body">
+            <div>
+              <span class="blabel">Deployment overrides (–vbparams)</span>
+              <div class="term">
+                <div class="term-bar"><span class="d"></span><span class="d"></span><span class="d"></span><span class="t">vbparams · reduced_data</span></div>
+                <pre><span class="up">legacy/upgraded node:</span>  reduced_data:-2:9223372036854775807
+<span class="fr">fresh control node:  </span>  reduced_data:0:9223372036854775807:0:432:2147483647:108</pre>
+              </div>
+              <p style="font-size:13.5px; color:var(--ink-soft); margin:12px 0 0;">
+                Regtest's confirmation window is 144 blocks. With <code>max_activation_height=432</code>,
+                <code>DeploymentMustSignalAfter()</code> makes height 144 the first mandatory-signaling height.
+              </p>
+            </div>
+            <div>
+              <span class="blabel">Procedure</span>
+              <ol class="proc">
+                <li>Build a non-signaling chain through height 143 on the legacy node.</li>
+                <li>Submit a non-signaling block at height 144 and a descendant at height 145.</li>
+                <li>Restart the same datadir with the deadline-enforcing parameters.</li>
+                <li>Confirm it remains at height 145.</li>
+                <li>Submit a signaling block at height 146 — accepted on the retained chain.</li>
+                <li>Feed blocks 1–143 and the identical block 144 to the fresh enforcing node.</li>
+              </ol>
+            </div>
+            <div>
+              <span class="blabel">Observed result</span>
+              <div class="observed">
+                <div class="o up"><span class="ol">Upgraded node</span>Retains the non-signaling height-144 ancestor.</div>
+                <div class="o fr"><span class="ol">Fresh node</span>Rejects it with <code class="reason">bad-version-reduced_data</code>.</div>
+              </div>
+            </div>
+            <div>
+              <span class="blabel">Test-framework output</span>
+              <div class="term">
+                <div class="term-bar"><span class="d"></span><span class="d"></span><span class="d"></span><span class="t">functional test</span></div>
+                <pre><span class="ok">CONFIRMED:</span> mandatory-signaling-invalid ancestor survives enforcement upgrade
+Tests successful</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Reproducer C -->
+        <div class="repro-card">
+          <div class="repro-head">
+            <span class="rid">Reproducer C</span>
+            <h3>Active script rule</h3>
+            <span class="rtag">Push value size limit exceeded</span>
+          </div>
+          <div class="repro-body">
+            <p style="font-size:14.5px; color:var(--ink-soft); margin:0;">
+              This case exercises a rule enforced by <em>script execution</em> rather than output-size checks.
+            </p>
+            <div>
+              <span class="blabel">Procedure</span>
+              <ol class="proc">
+                <li>While RDTS is never active, create a 34-byte P2WSH coinbase output whose witness script contains a 257-byte pushed element.</li>
+                <li>Mature and spend that output in a block accepted by the non-enforcing node.</li>
+                <li>Restart the same datadir with RDTS always active and extend the retained chain.</li>
+                <li>Feed the identical funding history and spending block to a fresh always-active node.</li>
+              </ol>
+            </div>
+            <div>
+              <span class="blabel">Observed result</span>
+              <div class="observed">
+                <div class="o up"><span class="ol">Upgraded node</span>Retains the spending block and accepts a descendant.</div>
+                <div class="o fr"><span class="ol">Fresh node</span>Rejects it; reason contains <code class="reason">Push value size limit exceeded</code>.</div>
+              </div>
+            </div>
+            <div>
+              <span class="blabel">Test-framework output</span>
+              <div class="term">
+                <div class="term-bar"><span class="d"></span><span class="d"></span><span class="d"></span><span class="t">functional test</span></div>
+                <pre><span class="ok">CONFIRMED:</span> active script-invalid ancestor survives enforcement upgrade
+Tests successful</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- RECOVERY & PRUNING -->
+  <section id="recovery">
+    <div class="wrap">
+      <div class="sectionhead prose">
+        <span class="num">04 / Recovery &amp; pruning</span>
+        <h2>Which startup modes detect it — and which don't.</h2>
+        <p class="sub">
+          The active-rule setup was restarted three ways on an unpruned datadir, then re-tested on a pruned
+          one. Only paths that actually re-run <code>ConnectBlock()</code> catch the block — and pruning
+          removes even that option.
+        </p>
+      </div>
+
+      <div class="tablewrap">
+        <table aria-label="Startup and recovery behavior by datadir type">
+          <thead>
+            <tr><th>Startup mode</th><th>Datadir</th><th>Result</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>checklevel=3 checkblocks=6</code> <span style="color:var(--ink-faint);">(default)</span></td>
+              <td>Unpruned</td>
+              <td><span class="tag bad">Issue persists</span> — starts at the invalid tip</td>
+            </tr>
+            <tr>
+              <td><code>-checklevel=4 -checkblocks=0</code></td>
+              <td>Unpruned</td>
+              <td><span class="tag ok">Detects</span> — refuses with <code class="reason">Corrupted block database detected</code></td>
+            </tr>
+            <tr>
+              <td><code>-reindex-chainstate</code></td>
+              <td>Unpruned</td>
+              <td><span class="tag ok">Recovers</span> — reconnects blocks, rejects the offender, stops at the last valid ancestor</td>
+            </tr>
+            <tr>
+              <td><code>checklevel=3 checkblocks=6</code> <span style="color:var(--ink-faint);">(default)</span></td>
+              <td>Pruned</td>
+              <td><span class="tag bad">Issue persists</span> — starts at height 600 with the ancestor retained</td>
+            </tr>
+            <tr>
+              <td><code>-checklevel=4 -checkblocks=0</code></td>
+              <td>Pruned</td>
+              <td><span class="tag bad">Misses it</span> — verification stops when historical block data is unavailable</td>
+            </tr>
+            <tr>
+              <td><code>-reindex-chainstate</code></td>
+              <td>Pruned</td>
+              <td><span class="tag bad">Refused</span> — prune mode is incompatible; full <code>-reindex</code> required</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout">
+        <span class="lbl">Why the pruned case is worse</span>
+        <p>
+          The pruned audit placed the violation at height 2, extended to height 600 with <code>-fastprune</code>,
+          and pruned away the block containing the violation before enabling enforcement. Because
+          <code>VerifyDB()</code> stops at missing pruned data and <code>VerifyLoadedChainstate()</code>
+          accepts <code>SKIPPED_MISSING_BLOCKS</code>, even a full level-4 scan starts successfully at the
+          unverified tip. Operators must not be told a partial scan proved the history valid.
+        </p>
+      </div>
+
+      <div class="detail-grid" style="margin-top:22px;">
+        <div class="detail-box">
+          <h4>Unpruned verification output</h4>
+          <p><code>CONFIRMED: checklevel=4 detects; reindex-chainstate recovers to valid ancestor</code></p>
+        </div>
+        <div class="detail-box">
+          <h4>Pruned verification output</h4>
+          <p><code>CONFIRMED: pruned default and full level-4 startup retain the unverified ancestor</code></p>
+        </div>
+      </div>
+      <p class="prose" style="color:var(--ink-faint); font-size:13px; margin-top:14px;">
+        Source correspondence: <code>VerifyDB()</code> stops at missing data at
+        <code>src/validation.cpp:5221-5226</code>; startup accepts
+        <code>SKIPPED_MISSING_BLOCKS</code> at <code>src/node/chainstate.cpp:250-253</code>; and prune mode
+        refuses <code>-reindex-chainstate</code> at <code>src/init.cpp:1126-1127</code>.
+      </p>
+
+      <div class="prose" style="margin-top:36px;">
+        <h3 style="font-family:var(--mono); font-size:13px; letter-spacing:0.06em; text-transform:uppercase; color:var(--ink-faint); margin:0 0 12px;">Existing suites that also passed against the audit build</h3>
+      </div>
+      <div class="mathrow" style="grid-template-columns:repeat(3,1fr);">
+        <div class="p"><p class="pk">RDTS</p><p class="pv" style="font-size:12px;">feature_rdts.py</p></div>
+        <div class="p"><p class="pk">UTXO height</p><p class="pv" style="font-size:11px;">reduced_data_utxo_height</p></div>
+        <div class="p"><p class="pk">Temporary deploy</p><p class="pv" style="font-size:10.5px;">reduced_data_temporary_deployment</p></div>
+        <div class="p"><p class="pk">BIP9 max height</p><p class="pv" style="font-size:11px;">bip9_max_activation_height</p></div>
+        <div class="p"><p class="pk">versionbits unit</p><p class="pv" style="font-size:12px;">13 cases</p></div>
+        <div class="p"><p class="pk">Assertions</p><p class="pv">111,608</p></div>
+      </div>
+      <p class="prose" style="color:var(--ink-faint); font-size:13px; margin-top:14px;">
+        These suites validate the underlying RDTS rules and the deployment state machine. The new audit
+        reproducer covers the history-dependent startup behavior they did not.
+      </p>
+    </div>
+  </section>
+
+  <!-- ROOT CAUSE -->
+  <section id="cause">
+    <div class="wrap">
+      <div class="sectionhead prose">
+        <span class="num">05 / Root cause</span>
+        <h2>Persisted validity doesn't say <em>which</em> rules ran.</h2>
+        <p class="sub">
+          Five mechanisms combine. The checks live in the right place — but nothing on the startup path
+          forces them to run again over inherited history.
+        </p>
+      </div>
+
+      <div class="cards">
+        <div class="card">
+          <div class="icon">01</div>
+          <h4>Checks live in ConnectBlock()</h4>
+          <p>Mandatory signaling, output-size, and script rules are all enforced during connection — and work when it's actually called.</p>
+        </div>
+        <div class="card">
+          <div class="icon">02</div>
+          <h4>Validity flags are rule-blind</h4>
+          <p><code>BLOCK_VALID_SCRIPTS</code> is the highest persisted level, but it never records that BIP110 was enabled or which rules applied.</p>
+        </div>
+        <div class="card">
+          <div class="icon">03</div>
+          <h4>The startup guard is SegWit-only</h4>
+          <p><code>NeedsRedownload()</code> scans for <code>BLOCK_OPT_WITNESS</code>. There is no BIP110 ancestry or provenance scan.</p>
+        </div>
+        <div class="card">
+          <div class="icon">04</div>
+          <h4>Default startup never reconnects</h4>
+          <p>Defaults are <code>checkblocks=6</code>, <code>checklevel=3</code>. Level 3 disconnects blocks; only level 4 reconnects via <code>ConnectBlock()</code>.</p>
+        </div>
+        <div class="card">
+          <div class="icon">05</div>
+          <h4>Crash recovery isn't validation</h4>
+          <p><code>RollforwardBlock()</code> only spends and adds coins during replay — it never runs the BIP110 checks.</p>
+        </div>
+        <div class="card" style="background:var(--accent-soft); border-color:color-mix(in srgb, var(--accent) 30%, transparent);">
+          <div class="icon">=</div>
+          <h4>Result</h4>
+          <p>A late-upgraded node loads chainstate produced under non-enforcing rules and trusts it — the invalid ancestor stays active across restarts.</p>
+        </div>
+      </div>
+
+      <div class="codeblock" style="margin-top:28px;">
+<span class="cmt"># default startup verification — src/validation.h</span>
+DEFAULT_CHECKBLOCKS = <span class="kw">6</span>
+DEFAULT_CHECKLEVEL  = <span class="kw">3</span>   <span class="cmt"># disconnects blocks, never reconnects</span>
+
+<span class="cmt"># CVerifyDB::VerifyDB()</span>
+level 1 → CheckBlock()        <span class="cmt"># context-free only</span>
+level 3 → disconnect blocks   <span class="cmt"># from a temporary coins view</span>
+level 4 → ConnectBlock()      <span class="cmt"># the only level that re-runs BIP110 ← not default</span>
+      </div>
+
+      <div class="callout">
+        <span class="lbl">Even BLOCK_VALID_SCRIPTS isn't literal proof</span>
+        <p>
+          <code>BLOCK_VALID_SCRIPTS</code> is the highest persisted validity level, but <code>ConnectBlock()</code>
+          can skip script checks for sufficiently buried ancestors of an <code>assumevalid</code> block and
+          still raise the block to that level. The status never records that BIP110 was enabled or which
+          exact rules ran when the block was connected — so any provenance fix must account for
+          <code>assumevalid</code> shortcuts, and must be evaluated <em>after</em> any <code>ReplayBlocks()</code>
+          recovery, since <code>RollforwardBlock()</code> updates coins without running the checks.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- CODE REFERENCES -->
+  <section id="refs">
+    <div class="wrap">
+      <div class="sectionhead prose">
+        <span class="num">06 / Code references</span>
+        <h2>Where each claim lives in the tree.</h2>
+        <p class="sub">
+          Real source, verified against commit <code>f41f01e1e6</code>. The BIP110 checks are present and
+          correct in <code>ConnectBlock()</code> — shown first. The gap is that nothing on the startup path
+          re-invokes them over inherited history.
+        </p>
+      </div>
+
+      <div class="callout" style="margin-top:0;">
+        <span class="lbl">Version scope</span>
+        <p>
+          Every absence claim and line reference in this report targets the affected commit
+          <code>f41f01e1e6de7025d52a865bef97f2a67277f0f3</code>. Later remediation commits or working-tree
+          changes are outside the reproduced baseline unless separately re-audited.
+        </p>
+      </div>
+
+      <div class="prose" style="margin-bottom:16px;">
+        <h3 style="font-size:18px; font-weight:640; margin:0 0 6px;">The checks that <em>do</em> run — during connection</h3>
+        <p style="color:var(--ink-soft); margin:0;">
+          These fire every time <code>ConnectBlock()</code> is actually called. The mandatory-signaling
+          rule that emits <code>bad-version-reduced_data</code>:
+        </p>
+      </div>
+      <div class="src">
+        <div class="src-head">
+          <span class="file">src/validation.cpp — ContextualCheckBlockHeaderVolatile()</span>
+          <span class="fn present">present · correct</span>
+        </div>
+        <pre class="code"><span class="cl cm">// Mandatory signaling for deployments approaching max_activation_height</span><span class="cl"><span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; MAX_VERSION_BITS_DEPLOYMENTS; i++) {</span><span class="cl">  <span class="kw">const</span> DeploymentPos pos = <span class="kw">static_cast</span>&lt;DeploymentPos&gt;(i);</span><span class="cl">  <span class="kw">const</span> ThresholdState deployment_state =</span><span class="cl">    m_versionbitscache.State(pindexPrev, consensusParams, pos);</span><span class="cl"><span class="kw">  if</span> (DeploymentMustSignalAfter(pindexPrev, consensusParams, pos, deployment_state)) {</span><span class="cl">    <span class="kw">const bool</span> fVersionBits = (block.nVersion &amp; VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS;</span><span class="cl">    <span class="kw">const bool</span> fDeploymentBit = (block.nVersion &amp; (uint32_t{1} &lt;&lt; deployment.bit)) != 0;</span><span class="cl hi-bad">    <span class="kw">if</span> (!(fVersionBits &amp;&amp; fDeploymentBit)) {</span><span class="cl hi-bad">      <span class="kw">return</span> state.Invalid(BlockValidationResult::BLOCK_CONSENSUS,</span><span class="cl hi-bad">                           <span class="st">"bad-version-"</span> + deployment_name,</span><span class="cl hi-bad">                           strprintf(<span class="st">"Block must signal for %s ..."</span>, ...));</span><span class="cl">    }</span><span class="cl">  }</span><span class="cl">}</span></pre>
+      </div>
+
+      <div class="prose" style="margin:22px 0 16px;">
+        <p style="color:var(--ink-soft); margin:0;">
+          And the active output-size rule that emits <code>bad-txns-vout-script-toolarge</code>, gated on the
+          deployment being active at the block:
+        </p>
+      </div>
+      <div class="src">
+        <div class="src-head">
+          <span class="file">src/validation.cpp — Chainstate::ConnectBlock()</span>
+          <span class="fn present">present · correct</span>
+        </div>
+        <pre class="code"><span class="cl"><span class="kw">const</span> CheckTxInputsRules chk_input_rules{</span><span class="cl">  DeploymentActiveAt(*pindex, m_chainman, DEPLOYMENT_REDUCED_DATA)</span><span class="cl">    ? CheckTxInputsRules::OutputSizeLimit : CheckTxInputsRules::None};</span><span class="cl cm">// Check generation tx output sizes if REDUCED_DATA is active</span><span class="cl hi-bad"><span class="kw">if</span> (chk_input_rules.test(CheckTxInputsRules::OutputSizeLimit)) {</span><span class="cl hi-bad">  TxValidationState tx_state;</span><span class="cl hi-bad"><span class="kw">  if</span> (!Consensus::CheckOutputSizes(*block.vtx[0], tx_state)) {</span><span class="cl hi-bad">    <span class="kw">return</span> state.Invalid(BlockValidationResult::BLOCK_CONSENSUS,</span><span class="cl hi-bad">                         tx_state.GetRejectReason(), ...);</span><span class="cl hi-bad">  }</span><span class="cl">}</span></pre>
+      </div>
+      <div class="callout" style="margin-bottom:12px;">
+        <span class="lbl">The gap in one line</span>
+        <p>
+          Both checks are correct — and both live <em>only</em> inside <code>ConnectBlock()</code>. Default
+          level-3 startup never calls <code>ConnectBlock()</code> for inherited blocks, so a block that
+          slipped in under non-enforcing software is never re-tested against either rule.
+        </p>
+      </div>
+
+      <div class="prose" style="margin:36px 0 4px;">
+        <h3 style="font-size:18px; font-weight:640; margin:0;">Full citation index</h3>
+      </div>
+
+      <div class="reflist" style="margin-top:16px;">
+        <div class="refgroup-head"><span class="gn">A</span> BIP110 checks inside ConnectBlock()</div>
+        <div class="refrow"><span class="loc">src/validation.cpp:2715</span><span class="what"><code>Chainstate::ConnectBlock()</code> begins here.</span></div>
+        <div class="refrow"><span class="loc">src/validation.cpp:2756-2759</span><span class="what">Calls <code>ContextualCheckBlockHeaderVolatile()</code> — the mandatory-signaling recheck.</span></div>
+        <div class="refrow"><span class="loc">src/validation.cpp:4651-4675</span><span class="what">Rejects a missing deployment bit with <code>bad-version-reduced_data</code>.</span></div>
+        <div class="refrow"><span class="loc">src/validation.cpp:2921-2935</span><span class="what">Derives the activation height and checks coinbase output sizes.</span></div>
+        <div class="refrow"><span class="loc">src/validation.cpp:2951-2961</span><span class="what">Applies output-size checks to non-coinbase transactions.</span></div>
+        <div class="refrow"><span class="loc">src/validation.cpp:2973-2979</span><span class="what">Selects per-input script flags for the activation-height grandfathering rule.</span></div>
+        <div class="refrow"><span class="loc">src/validation.cpp:3000-3008</span><span class="what">Performs script verification.</span></div>
+        <div class="refrow"><span class="loc">src/validation.cpp:3064-3067</span><span class="what">Raises the block to <code>BLOCK_VALID_SCRIPTS</code> after successful connection.</span></div>
+      </div>
+
+      <div class="reflist" style="margin-top:22px;">
+        <div class="refgroup-head"><span class="gn">B</span> The SegWit guard that has no BIP110 equivalent</div>
+        <div class="refrow"><span class="loc">src/chain.h:132</span><span class="what"><code>BLOCK_OPT_WITNESS</code> — dedicated block-index status bit.</span></div>
+        <div class="refrow"><span class="loc">src/validation.cpp:4277-4282</span><span class="what">Sets the bit when block data is received by a witness-enforcing client.</span></div>
+        <div class="refrow"><span class="loc">src/validation.cpp:5417-5432</span><span class="what"><code>NeedsRedownload()</code> walks active SegWit blocks; no BIP110 check.</span></div>
+        <div class="refrow"><span class="loc">src/node/chainstate.cpp:129-134</span><span class="what">Startup invokes the guard — detects only the SegWit condition.</span></div>
+        <div class="refrow"><span class="loc">test/functional/feature_presegwit_node_upgrade.py:22-53</span><span class="what">The SegWit late-upgrade regression test; no BIP110 equivalent existed.</span></div>
+      </div>
+
+      <div class="reflist" style="margin-top:22px;">
+        <div class="refgroup-head"><span class="gn">C</span> Startup verification &amp; replay never reconnect</div>
+        <div class="refrow"><span class="loc">src/validation.h:72-73</span><span class="what"><code>DEFAULT_CHECKBLOCKS = 6</code>, <code>DEFAULT_CHECKLEVEL = 3</code>.</span></div>
+        <div class="refrow"><span class="loc">src/validation.cpp:5234-5239</span><span class="what">Level 1 calls only context-free <code>CheckBlock()</code>.</span></div>
+        <div class="refrow"><span class="loc">src/validation.cpp:5250-5269</span><span class="what">Level 3 disconnects blocks from a temporary coins view.</span></div>
+        <div class="refrow"><span class="loc">src/validation.cpp:5284-5305</span><span class="what">Only level 4 reconnects via <code>ConnectBlock()</code>.</span></div>
+        <div class="refrow"><span class="loc">src/validation.cpp:5320-5339</span><span class="what"><code>RollforwardBlock()</code> only spends and adds coins during replay.</span></div>
+        <div class="refrow"><span class="loc">src/validation.cpp:2771-2799</span><span class="what"><code>assumevalid</code> can skip script checks for buried ancestors.</span></div>
+      </div>
+
+      <div class="reflist" style="margin-top:22px;">
+        <div class="refgroup-head"><span class="gn">D</span> Deployment selection &amp; mainnet parameters</div>
+        <div class="refrow"><span class="loc">src/chainparams.cpp:139-149</span><span class="what">Selects whether RDTS is enabled.</span></div>
+        <div class="refrow"><span class="loc">src/kernel/chainparams.cpp:126-140</span><span class="what">Defines mainnet RDTS parameters; disables them for the no-enforcement mode.</span></div>
+        <div class="refrow"><span class="loc">src/deploymentstatus.h:60-70</span><span class="what">Formula deriving the mandatory-signaling range from activation height.</span></div>
+      </div>
+
+      <div class="reflist" style="margin-top:22px;">
+        <div class="refgroup-head"><span class="gn">E</span> Pruning, snapshots &amp; recovery constraints</div>
+        <div class="refrow"><span class="loc">src/validation.cpp:5221-5226</span><span class="what"><code>VerifyDB()</code> stops when historical block data is missing.</span></div>
+        <div class="refrow"><span class="loc">src/node/chainstate.cpp:250-253</span><span class="what">Startup accepts <code>SKIPPED_MISSING_BLOCKS</code> rather than treating it as complete verification.</span></div>
+        <div class="refrow"><span class="loc">src/init.cpp:1126-1127</span><span class="what">Prune mode rejects <code>-reindex-chainstate</code> and requires full <code>-reindex</code>.</span></div>
+        <div class="refrow"><span class="loc">src/validation.cpp:6503-6510</span><span class="what">AssumeUTXO activation synthesizes <code>BLOCK_OPT_WITNESS</code> for snapshot ancestors.</span></div>
+        <div class="refrow"><span class="loc">src/kernel/chainparams.cpp:143-144</span><span class="what">The audited mainnet <code>defaultAssumeValid</code> is at height 912,683.</span></div>
+      </div>
+
+      <div class="prose" style="margin-top:44px;">
+        <h3 style="font-family:var(--mono); font-size:13px; letter-spacing:0.06em; text-transform:uppercase; color:var(--ink-faint); margin:0 0 12px;">Audit confidence</h3>
+      </div>
+      <div class="tablewrap">
+        <table aria-label="Audit confidence by area">
+          <thead><tr><th>Area</th><th>Verification status</th></tr></thead>
+          <tbody>
+            <tr><td>Cited source paths, startup levels, deployment arithmetic</td><td><span class="vs verif">Verified against commit</span></td></tr>
+            <tr><td>Mandatory signaling, active output rule, active script rule</td><td><span class="vs repro">Reproduced on regtest</span></td></tr>
+            <tr><td>Default restart, full level-4 check, reindex recovery</td><td><span class="vs repro">Reproduced (unpruned)</span></td></tr>
+            <tr><td>Pruned default / full level-4 limitation</td><td><span class="vs repro">Reproduced on regtest</span></td></tr>
+            <tr><td>Separate enforcing / non-enforcing build datadir reuse</td><td><span class="vs repro">Reproduced</span></td></tr>
+            <tr><td>Mainnet deployment state at block 958,470</td><td><span class="vs verif">Verified — STARTED, no rule applicable</span></td></tr>
+            <tr><td>Mainnet transaction / block scan</td><td><span class="vs source">Not performed — no rule applicable</span></td></tr>
+            <tr><td>AssumeUTXO &amp; interrupted-flush replay behavior</td><td><span class="vs source">Source-reviewed only</span></td></tr>
+            <tr><td>Proposed provenance / attestation fix</td><td><span class="vs source">Design analysis only</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- SEGWIT -->
+  <section id="segwit">
+    <div class="wrap">
+      <div class="sectionhead prose">
+        <span class="num">07 / Precedent</span>
+        <h2>SegWit already solved this shape.</h2>
+        <p class="sub">
+          BIP141 recognized that persisted validity from older software may be insufficient after an
+          upgrade — and added a coordinated guard. The equivalent BIP110 pieces are absent.
+        </p>
+      </div>
+
+      <div class="contrast">
+        <div class="col seg">
+          <div class="colhead">SegWit / BIP141 — present</div>
+          <div class="row"><span class="rl">Durable marker</span><strong>BLOCK_OPT_WITNESS</strong> records aware handling of applicable history.</div>
+          <div class="row"><span class="rl">Startup scan</span><strong>NeedsRedownload()</strong> walks every active SegWit ancestor.</div>
+          <div class="row"><span class="rl">Fail-closed</span>Startup <strong>refuses</strong> and requests <code>-reindex</code>.</div>
+          <div class="row"><span class="rl">Regression test</span><strong>feature_presegwit_node_upgrade.py</strong> covers it.</div>
+        </div>
+        <div class="col rdts">
+          <div class="colhead">BIP110 / RDTS — absent</div>
+          <div class="row"><span class="rl">Durable marker</span><strong>None</strong> — no status bit, ruleset ID, or attestation.</div>
+          <div class="row"><span class="rl">Startup scan</span><strong>None</strong> — no BIP110 ancestry / provenance scan.</div>
+          <div class="row"><span class="rl">Fail-closed</span>Startup <strong>succeeds</strong> and trusts existing state.</div>
+          <div class="row"><span class="rl">Regression test</span><strong>None existed</strong> — the audit reproducer is the first.</div>
+        </div>
+      </div>
+
+      <!-- the smoking gun comment -->
+      <div class="prose" style="margin-top:44px;">
+        <h3 style="font-size:19px; font-weight:640; margin:0 0 6px;">The source comment that names the problem</h3>
+        <p style="color:var(--ink-soft); margin:0 0 4px;">
+          <code>ConnectBlock()</code> itself documents this exact hazard and points at <code>NeedsRedownload()</code>
+          as the BIP141 remedy — the approach that was never built for BIP110.
+        </p>
+      </div>
+      <div class="src" style="margin-top:16px;">
+        <div class="src-head">
+          <span class="file">src/validation.cpp — Chainstate::ConnectBlock()</span>
+          <span class="fn">lines 2728–2736</span>
+        </div>
+        <pre class="code"><span class="cl cm">// Check it again in case a previous version let a bad block in</span><span class="cl cm">// NOTE: We don't currently (re-)invoke ContextualCheckBlock() or</span><span class="cl cm">// ContextualCheckBlockHeader() here. This means that if we add a new</span><span class="cl cm">// consensus rule that is enforced in one of those two functions, then we</span><span class="cl cm">// may have let in a block that violates the rule prior to updating the</span><span class="cl hi cm">// software, and we would NOT be enforcing the rule here. Fully solving</span><span class="cl hi cm">// upgrade from one software version to the next after a consensus rule</span><span class="cl hi cm">// change is potentially tricky and issue-specific (see NeedsRedownload()</span><span class="cl hi cm">// for one approach that was used for BIP 141 deployment).</span></pre>
+      </div>
+      <div class="callout">
+        <span class="lbl">Why this is the crux</span>
+        <p>
+          The general contextual header function carries the same upgrade warning. BIP110's mandatory-
+          signaling check was deliberately split into <code>ContextualCheckBlockHeaderVolatile()</code>
+          and explicitly re-invoked by <code>ConnectBlock()</code>, so it works during a real reconnect.
+          The failure is that ordinary startup never reconnects inherited blocks at all. The code therefore
+          anticipates precisely the upgrade hazard demonstrated here, while only SegWit has a startup guard.
+        </p>
+      </div>
+
+      <!-- three-piece guard comparison -->
+      <div class="prose" style="margin-top:52px;">
+        <h3 style="font-size:19px; font-weight:640; margin:0 0 6px;">The three guard pieces, side by side</h3>
+        <p style="color:var(--ink-soft); margin:0;">
+          BIP141 shipped three coordinated pieces. For each, the real SegWit source is on the left; the
+          BIP110 equivalent on the right is <strong>absent</strong>.
+        </p>
+      </div>
+
+      <div class="guard" style="margin-top:24px;">
+
+        <!-- PIECE 1: durable marker -->
+        <div class="guard-piece">
+          <div class="gp-head">
+            <span class="gp-n">1</span>
+            <div class="gp-t">
+              <h3>Durable marker</h3>
+              <p>A persisted bit recording that aware software handled the block.</p>
+            </div>
+            <div class="gp-status"><span class="yes">SegWit ✓</span><span class="arrow">→</span><span class="no">BIP110 ✕</span></div>
+          </div>
+          <div class="gp-cols">
+            <div class="gp-col seg">
+              <p class="cl-head"><span class="badge-dot"></span>SegWit — the bit exists</p>
+              <div class="src">
+                <div class="src-head"><span class="file">src/chain.h</span><span class="fn present">present</span></div>
+                <pre class="code"><span class="cl">    <span class="kw">BLOCK_OPT_WITNESS</span> = <span class="st">128</span>,</span><span class="cl cm">    //!&lt; block data in blk*.dat was</span><span class="cl cm">    //!&lt; received with a witness-</span><span class="cl cm">    //!&lt; enforcing client</span></pre>
+              </div>
+              <div class="src" style="margin-top:12px;">
+                <div class="src-head"><span class="file">src/validation.cpp — set on receipt</span><span class="fn present">present</span></div>
+                <pre class="code"><span class="cl"><span class="kw">if</span> (DeploymentActiveAt(*pindexNew,</span><span class="cl">      *<span class="kw">this</span>, DEPLOYMENT_SEGWIT)) {</span><span class="cl hi-ok">  pindexNew-&gt;nStatus |= BLOCK_OPT_WITNESS;</span><span class="cl">}</span></pre>
+              </div>
+            </div>
+            <div class="gp-col rdts">
+              <p class="cl-head"><span class="badge-dot"></span>BIP110 — nothing equivalent</p>
+              <div class="gp-absent">
+                <span class="big">No BLOCK_OPT_BIP110_VALIDATED</span>
+                <p>There is no BIP110 status bit, ruleset identifier, or chainstate attestation. After
+                  connection a block reaches <code>BLOCK_VALID_SCRIPTS</code> — which never records
+                  <em>which</em> rules ran, and can be reached even when <code>assumevalid</code> skipped
+                  script checks.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PIECE 2: startup scan -->
+        <div class="guard-piece">
+          <div class="gp-head">
+            <span class="gp-n">2</span>
+            <div class="gp-t">
+              <h3>Startup ancestry scan</h3>
+              <p>Walk every applicable active-chain ancestor and check the marker.</p>
+            </div>
+            <div class="gp-status"><span class="yes">SegWit ✓</span><span class="arrow">→</span><span class="no">BIP110 ✕</span></div>
+          </div>
+          <div class="gp-cols">
+            <div class="gp-col seg">
+              <p class="cl-head"><span class="badge-dot"></span>SegWit — NeedsRedownload()</p>
+              <div class="src">
+                <div class="src-head"><span class="file">src/validation.cpp</span><span class="fn present">present</span></div>
+                <pre class="code"><span class="cl"><span class="kw">bool</span> <span class="fu">Chainstate::NeedsRedownload</span>() <span class="kw">const</span></span><span class="cl">{</span><span class="cl">  CBlockIndex* block{m_chain.Tip()};</span><span class="cl cm">  // walk back over active segwit range</span><span class="cl"><span class="kw">  while</span> (block != <span class="kw">nullptr</span> &amp;&amp;</span><span class="cl">    DeploymentActiveAt(*block, m_chainman,</span><span class="cl">      DEPLOYMENT_SEGWIT)) {</span><span class="cl hi-ok"><span class="kw">    if</span> (!(block-&gt;nStatus &amp; BLOCK_OPT_WITNESS))</span><span class="cl hi-ok"><span class="kw">      return true</span>; <span class="cm">// insufficiently validated</span></span><span class="cl">    block = block-&gt;pprev;</span><span class="cl">  }</span><span class="cl"><span class="kw">  return false</span>;</span><span class="cl">}</span></pre>
+              </div>
+            </div>
+            <div class="gp-col rdts">
+              <p class="cl-head"><span class="badge-dot"></span>BIP110 — no scan added</p>
+              <div class="gp-absent">
+                <span class="big">NeedsRedownload() is SegWit-only</span>
+                <p>The function checks <code>DEPLOYMENT_SEGWIT</code> and <code>BLOCK_OPT_WITNESS</code> only.
+                  No branch walks the mandatory-signaling interval or the active RDTS range, so no BIP110
+                  ancestor is ever re-examined at startup.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PIECE 3: fail-closed -->
+        <div class="guard-piece">
+          <div class="gp-head">
+            <span class="gp-n">3</span>
+            <div class="gp-t">
+              <h3>Fail-closed recovery</h3>
+              <p>Refuse startup and demand a rebuild when history is insufficient.</p>
+            </div>
+            <div class="gp-status"><span class="yes">SegWit ✓</span><span class="arrow">→</span><span class="no">BIP110 ✕</span></div>
+          </div>
+          <div class="gp-cols">
+            <div class="gp-col seg">
+              <p class="cl-head"><span class="badge-dot"></span>SegWit — startup refuses</p>
+              <div class="src">
+                <div class="src-head"><span class="file">src/node/chainstate.cpp</span><span class="fn present">present</span></div>
+                <pre class="code"><span class="cl"><span class="kw">if</span> (std::any_of(chainstates.begin(),</span><span class="cl">    chainstates.end(), [](<span class="kw">const</span> Chainstate* cs)</span><span class="cl">    { <span class="kw">return</span> cs-&gt;NeedsRedownload(); })) {</span><span class="cl hi-ok"><span class="kw">  return</span> {ChainstateLoadStatus::FAILURE,</span><span class="cl hi-ok">    strprintf(_(<span class="st">"Witness data for blocks</span></span><span class="cl hi-ok"><span class="st">    after height %d requires validation.</span></span><span class="cl hi-ok"><span class="st">    Please restart with -reindex."</span>),</span><span class="cl hi-ok">    ...SegwitHeight)};</span><span class="cl">}</span></pre>
+              </div>
+            </div>
+            <div class="gp-col rdts">
+              <p class="cl-head"><span class="badge-dot"></span>BIP110 — startup succeeds</p>
+              <div class="gp-absent">
+                <span class="big">No refusal, no reindex prompt</span>
+                <p>With no BIP110 clause in the guard, startup completes normally at the inherited tip. The
+                  operator is never told the chainstate could not have been produced under the rules they
+                  just enabled.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="callout" style="margin-top:32px;">
+        <span class="lbl">Don't copy the marker verbatim</span>
+        <p>
+          Note the asymmetry: <code>BLOCK_OPT_WITNESS</code> is set when block <em>data</em> is received
+          (see piece 1), not after <code>ConnectBlock()</code> runs — so it proves witness-aware receipt,
+          not that every consensus check executed. BIP110's rules are <code>ConnectBlock()</code>-only and
+          contextual, so its marker must record successful <em>validation</em> under the applicable rules,
+          not mere receipt. AssumeUTXO makes this sharper still: snapshot activation literally
+          <em>fakes</em> <code>BLOCK_OPT_WITNESS</code> for ancestors —
+          <code>src/validation.cpp:6503-6510</code> — which a BIP110 guard must not blindly imitate.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- MAINNET REACHABILITY -->
+  <section id="mainnet">
+    <div class="wrap">
+      <div class="sectionhead prose">
+        <span class="num">08 / Mainnet reachability</span>
+        <h2>When this becomes reachable on mainnet.</h2>
+        <p class="sub">
+          The gap turns consensus-relevant at the first height where an enforcing node would reject a block
+          under either mandatory signaling or an active RDTS rule. Here is where mainnet stood at the
+          audited tip, and where that threshold sits.
+        </p>
+      </div>
+
+      <div class="prose">
+        <p>Hardcoded mainnet parameters (<code>src/kernel/chainparams.cpp:126-133</code>):</p>
+      </div>
+      <div class="mathrow">
+        <div class="p"><p class="pk">Version bit</p><p class="pv">4</p></div>
+        <div class="p"><p class="pk">Max activation</p><p class="pv">965,664</p></div>
+        <div class="p"><p class="pk">Conf. window</p><p class="pv">2,016</p></div>
+        <div class="p"><p class="pk">Active duration</p><p class="pv">52,416</p></div>
+        <div class="p"><p class="pk">Threshold</p><p class="pv">1,109/2,016</p></div>
+      </div>
+
+      <div class="formula">
+<span class="cmt"># If the deployment stays in STARTED, the mandatory-signaling range is:</span>
+mandatory range start = 965,664 − (2 × 2,016) = <span class="hl">961,632</span>
+mandatory range end   = 965,664 − 2,016       = <span class="hl">963,648</span>  <span class="cmt"># exclusive</span>
+
+<span class="cmt"># So mandatory signaling would apply across:</span>
+heights <span class="range">961,632 → 963,647</span>   <span class="cmt"># conditional on STARTED; lock-in can change this earlier</span>
+      </div>
+
+      <div class="snapshot">
+        <div class="s">
+          <p class="sk">Audited tip · 2026-07-17</p>
+          <p class="sv">height 958,470</p>
+          <p class="sd">Independently synchronized and proof-of-work-validated header chain. Hash <code style="font-size:0.85em;">0000000000000000000170c2ffa184d0b9f3f4929811672a7c8f019ad0b38270</code>, cross-checked against <a href="https://mempool.space/api/block-height/958470">mempool.space</a>.</p>
+        </div>
+        <div class="s">
+          <p class="sk">Deployment state</p>
+          <p class="sv state">STARTED</p>
+          <p class="sd">Replayed <code>src/versionbits.cpp:10-118</code> over the synced headers. The largest completed-period count was 20; the current period had 8 signals in its first 871 blocks. Completed-period counts from heights 937,440–957,599 matched the <a href="https://bip110monitor.com/api">BIP110 monitor API</a>.</p>
+        </div>
+        <div class="s">
+          <p class="sk">Rule applicable?</p>
+          <p class="sv" style="color:var(--valid);">Not yet</p>
+          <p class="sd">958,470 is below 961,632 and the deployment hadn't locked in early, so neither mandatory signaling nor active RDTS rules applied at the snapshot.</p>
+        </div>
+      </div>
+
+      <div class="callout">
+        <span class="lbl">Height-specific &amp; time-sensitive</span>
+        <p>
+          No mainnet block-content scan was performed — it wasn't necessary, because the header-derived
+          state showed no BIP110 rule was active or mandatory at the audited tip. This observation must be
+          refreshed as mainnet advances toward height 961,632. Ordinary threshold lock-in can move the
+          applicable window earlier.
+        </p>
+      </div>
+
+      <div class="detail-block prose">
+        <h3 class="minihead">Reachability boundary</h3>
+        <p>
+          The upgrade bug becomes reachable at the first height where an enforcing node would reject a
+          block for mandatory signaling or active RDTS transaction/script rules. Active-rule exposure starts
+          at the actual activation height, whether activation occurs by threshold signaling or at the
+          deadline. The public services above were corroborating checks; deployment state was calculated
+          locally from the synchronized headers and the audited implementation.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- IMPACT -->
+  <section id="impact">
+    <div class="wrap">
+      <div class="sectionhead prose">
+        <span class="num">09 / Impact</span>
+        <h2>What can and cannot happen.</h2>
+        <p class="sub">
+          Severity is left for maintainers to assign. Impact can be high for an affected miner, wallet, or
+          service; exploitability is conditional and, absent an offending block, dormant.
+        </p>
+      </div>
+
+      <div class="split">
+        <div class="panel can">
+          <h4>What can happen</h4>
+          <ul>
+            <li>A user upgrades to enforce BIP110 but unknowingly keeps following a chain that violates it.</li>
+            <li>The enforcing network can fragment into many chains — one per distinct buried invalid ancestor — all reporting the same deployment as active while holding different tips and UTXO sets.</li>
+            <li>Wallet balances and confirmation status can differ between those nodes.</li>
+            <li>A miner or service can keep building on a fork clean nodes reject.</li>
+            <li>Late upgrading fails to deliver the protection the operator intended.</li>
+          </ul>
+        </div>
+        <div class="panel cannot">
+          <h4>What is not demonstrated</h4>
+          <ul>
+            <li>No mainnet block is claimed to violate BIP110; no mainnet data was tested.</li>
+            <li>No divergence between two nodes that enforced the same rules from the start.</li>
+            <li>No bypass of <code>ConnectBlock()</code> for newly received blocks.</li>
+            <li>No proof-of-work bypass, database corruption, or remote code execution.</li>
+            <li>No chain split is created by the finding alone; a sufficiently-worked legacy-valid / BIP110-invalid block must first exist.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout">
+        <span class="lbl">Why severity is unassigned</span>
+        <p>
+          Consequences can be high for an affected miner, wallet, or service because it may stay on a branch
+          rejected by clean enforcing nodes. Exploitability has strong preconditions: the violating block
+          must obtain enough proof of work to enter the victim's active chain, and that victim must enable
+          enforcement only after persisting it. Without such a block, the defect remains dormant.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- FIX -->
+  <section id="fix">
+    <div class="wrap">
+      <div class="sectionhead prose">
+        <span class="num">10 / Fix</span>
+        <h2>Prove BIP110 provenance, or fail closed.</h2>
+        <p class="sub">
+          A robust fix either makes the supported upgrade boundary explicit and requires revalidation, or
+          persists enough validation provenance to fail closed when a datadir is advanced without enforcement.
+        </p>
+      </div>
+
+      <div class="options">
+        <div class="option">
+          <span class="tag">Option A</span>
+          <div>
+            <h4>Per-block validation provenance</h4>
+            <p>Add a status bit — e.g. <code>BLOCK_OPT_BIP110_VALIDATED</code> — set only after all applicable BIP110 checks succeed during a real connection. Scan every applicable active-chain ancestor at startup; if any lacks it, fail closed and require reindex. Tie the marker to a fixed, reviewed ruleset.</p>
+          </div>
+        </div>
+        <div class="option">
+          <span class="tag">Option B</span>
+          <div>
+            <h4>Chainstate ruleset attestation</h4>
+            <p>Per-chainstate metadata: a ruleset fingerprint plus the tip it applies through, updated atomically with the coins database's best-block transition. Startup requires the attested tip and ruleset to match the loaded coins tip.</p>
+          </div>
+        </div>
+        <div class="option">
+          <span class="tag">Option C</span>
+          <div>
+            <h4>Explicit unsupported transition</h4>
+            <p>If enabling BIP110 on a datadir that crossed an applicable height isn't meant to be supported, enforce an unconditional rebuild requirement. Automatic refusal based on durable state beats documentation alone.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail-block prose">
+        <h3 class="minihead">Per-block provenance design requirements</h3>
+        <p>A marker is safe only if its meaning is precise and durable. Option A must satisfy all of these properties:</p>
+      </div>
+      <div class="number-grid">
+        <div class="item"><span><strong>Cover every applicable phase.</strong> One ancestry-sensitive helper must include both the mandatory-signaling interval and active RDTS transaction/script rules.</span></div>
+        <div class="item"><span><strong>Record successful connection.</strong> Set provenance only after all applicable checks succeed in a real <code>ConnectBlock()</code> execution.</span></div>
+        <div class="item"><span><strong>Exclude weak paths.</strong> Never set it in non-enforcing builds, during block receipt, or because <code>BLOCK_VALID_SCRIPTS</code> was already present.</span></div>
+        <div class="item"><span><strong>Exclude dry runs.</strong> Do not persist provenance for <code>fJustCheck</code> validation that is not becoming a connected chainstate result.</span></div>
+        <div class="item"><span><strong>Account for <code>assumevalid</code>.</strong> Force applicable BIP110 script checks or withhold the marker whenever a shortcut skipped them.</span></div>
+        <div class="item"><span><strong>Bind the ruleset.</strong> A bare bit is insufficient if parameters or semantics can change while preserving its meaning; regtest <code>-vbparams</code> makes this concrete.</span></div>
+        <div class="item"><span><strong>Scan the complete applicable ancestry.</strong> Startup must inspect every active-chain block at which mandatory signaling or active rules apply, not just the recent verification window.</span></div>
+        <div class="item"><span><strong>Fail closed with correct recovery.</strong> Require <code>-reindex-chainstate -assumevalid=0</code> when data exists, or full reindex/redownload when pruning removed it.</span></div>
+        <div class="item"><span><strong>Run after replay.</strong> Evaluate provenance after <code>ReplayBlocks()</code>, because <code>RollforwardBlock()</code> changes coins without executing BIP110 validation.</span></div>
+      </div>
+
+      <div class="detail-grid" style="margin-top:22px;">
+        <div class="detail-box">
+          <h4>Side branches</h4>
+          <p>They need not be pre-marked. If a side branch later becomes a reorganization candidate, its blocks pass through <code>ConnectBlock()</code> before entering the active chain and gain provenance only after successful validation.</p>
+        </div>
+        <div class="detail-box">
+          <h4>Status-bit compatibility</h4>
+          <p>Do not repurpose <code>BLOCK_STATUS_RESERVED</code> without a database audit; older databases may retain its previous AssumeUTXO meaning. Prefer a new unambiguous bit or separate metadata.</p>
+        </div>
+        <div class="detail-box">
+          <h4>Why a global boolean is weak</h4>
+          <p>Older or non-enforcing software can advance the datadir without knowing it must invalidate a global flag. Per-block provenance pinpoints which applicable blocks lack enforcing validation.</p>
+        </div>
+        <div class="detail-box">
+          <h4>Unresolved engineering review</h4>
+          <p>Either storage design needs block-index compatibility, atomic flush ordering, multiple-chainstate, downgrade/re-upgrade, and first-upgrade migration review. No fix was prototyped in this audit.</p>
+        </div>
+      </div>
+
+      <div class="callout" style="margin-top:28px;">
+        <span class="lbl">Fix timing matters</span>
+        <p>
+          If provenance support ships <em>before</em> any BIP110 rule applies on mainnet, no historical
+          block needs it — enforcing nodes mark blocks prospectively and a later transition is detectable
+          without forcing a rebuild. Mainnet was still before that point at the audited height 958,470.
+          This is time-sensitive.
+        </p>
+      </div>
+
+      <div class="detail-grid" style="margin-top:22px;">
+        <div class="detail-box">
+          <h4>If a fix ships before applicability</h4>
+          <p>Continuously enforcing nodes can mark or attest applicable blocks prospectively, while non-enforcing nodes do not. A later enforcement transition is detectable without rebuilding pre-BIP110 history.</p>
+        </div>
+        <div class="detail-box">
+          <h4>If a fix ships after applicability</h4>
+          <p>Migration must distinguish history genuinely connected by an enforcing release from history inherited from non-enforcing software. The existing database does not reliably encode that distinction, so a one-time reconnect may be unavoidable.</p>
+        </div>
+      </div>
+
+      <div class="prose" style="margin-top:40px;">
+        <h3 style="font-family:var(--mono); font-size:13px; letter-spacing:0.06em; text-transform:uppercase; color:var(--ink-faint); margin:0 0 12px;">The applicability helper (conceptual)</h3>
+        <p style="color:var(--ink-soft); font-size:15px; margin:0 0 4px;">
+          Both the marker-setting path and the startup scan should share one ancestry-sensitive test for
+          whether BIP110 provenance is required at a block — covering both the mandatory-signaling interval
+          and the active RDTS rules:
+        </p>
+      </div>
+      <div class="codeblock" style="margin-top:16px;">
+<span class="kw">bool</span> BIP110ValidationRequiredAt(<span class="kw">const</span> CBlockIndex&amp; index,
+                                ChainstateManager&amp; chainman)
+{
+    <span class="kw">const auto</span> state = chainman.m_versionbitscache.State(
+        index.pprev, chainman.GetConsensus(),
+        Consensus::DEPLOYMENT_REDUCED_DATA);
+
+    <span class="kw">return</span> DeploymentMustSignalAfter(
+               index.pprev, chainman.GetConsensus(),
+               Consensus::DEPLOYMENT_REDUCED_DATA, state)
+        || DeploymentActiveAt(
+               index, chainman, Consensus::DEPLOYMENT_REDUCED_DATA);
+}
+
+<span class="cmt">// after a non-fJustCheck connection where every applicable check ran:</span>
+<span class="kw">if</span> (BIP110ValidationRequiredAt(*pindex, m_chainman) &amp;&amp; bip110_checks_complete) {
+    pindex-&gt;nStatus |= BLOCK_OPT_BIP110_VALIDATED;
+    m_blockman.m_dirty_blockindex.insert(pindex);
+}
+      </div>
+
+      <div class="detail-block prose">
+        <h3 class="minihead">Pruning and AssumeUTXO policy</h3>
+        <p>
+          Missing provenance and missing recovery data are different states. An unpruned node with all
+          applicable blocks can be directed to reconnect. If pruning removed required blocks, a partial scan
+          cannot establish safety and the node must require a full reindex/redownload path.
+        </p>
+        <p>
+          An AssumeUTXO chainstate must not receive synthesized BIP110 provenance merely because the snapshot
+          base hash commits to header ancestry. Snapshot acceptance needs an explicit policy tying its trust
+          to a BIP110-valid base-chain commitment, or provenance must remain provisional until background
+          validation establishes it. Current snapshot activation synthesizes <code>BLOCK_OPT_WITNESS</code>
+          for ancestors; copying that behavior for BIP110 without a BIP110-specific trust review would
+          recreate the ambiguity.
+        </p>
+      </div>
+
+      <div class="prose" style="margin-top:40px;">
+        <h3 style="font-family:var(--mono); font-size:13px; letter-spacing:0.06em; text-transform:uppercase; color:var(--ink-faint); margin:0 0 12px;">What does <em>not</em> fully solve it</h3>
+      </div>
+      <div class="panel can" style="background:var(--danger-soft); border-color:color-mix(in srgb, var(--danger) 30%, transparent);">
+        <ul>
+          <li><strong>Rechecking only new blocks</strong> — already done; the retained ancestor remains.</li>
+          <li><strong>Raising default verification to level 4 for six blocks</strong> — the offender may be older.</li>
+          <li><strong>Calling context-free <code>CheckBlock()</code> again</strong> — it applies no deployment-dependent rules.</li>
+          <li><strong>Trusting <code>BLOCK_VALID_SCRIPTS</code></strong> — it doesn't encode which soft-fork rules were active.</li>
+          <li><strong>Relying on the operator to remember a manual reindex</strong> — without detecting unsafe chainstate.</li>
+        </ul>
+      </div>
+
+      <div class="prose" style="margin-top:40px;">
+        <h3 style="font-family:var(--mono); font-size:13px; letter-spacing:0.06em; text-transform:uppercase; color:var(--ink-faint); margin:0 0 6px;">Required regression coverage</h3>
+        <p style="color:var(--ink-soft); font-size:15px; margin:0;">Before a fix is complete, add automated tests for each transition and recovery path:</p>
+      </div>
+      <div class="steps" style="margin-top:20px;">
+        <div class="step"><span class="n"></span><div class="body"><h4>Signaling boundary</h4><p>Non-enforcing → enforcing datadir across the mandatory-signaling boundary.</p></div></div>
+        <div class="step"><span class="n"></span><div class="body"><h4>Active output rules</h4><p>The same transition across active output-size rules.</p></div></div>
+        <div class="step"><span class="n"></span><div class="body"><h4>Active script rule</h4><p>The same transition with a script-rule violation.</p></div></div>
+        <div class="step"><span class="n"></span><div class="body"><h4>Deep ancestor</h4><p>An offending ancestor deeper than the default six-block depth.</p></div></div>
+        <div class="step"><span class="n"></span><div class="body"><h4>Clean restart</h4><p>Normal restart where all applicable blocks have valid provenance — no false-positive rebuild.</p></div></div>
+        <div class="step"><span class="n"></span><div class="body"><h4>Chainstate recovery</h4><p><code>-reindex-chainstate -assumevalid=0</code> reconnects and stops at the last valid ancestor.</p></div></div>
+        <div class="step"><span class="n"></span><div class="body"><h4>Pruned missing data</h4><p>Applicable history lacks provenance and its block data is unavailable; startup must fail safely.</p></div></div>
+        <div class="step"><span class="n"></span><div class="body"><h4>Interrupted flush</h4><p><code>ReplayBlocks()</code> recovery must not silently create or preserve a false attestation.</p></div></div>
+        <div class="step"><span class="n"></span><div class="body"><h4>AssumeUTXO</h4><p>Cover snapshot activation, trust semantics, background validation, and final chainstate handoff.</p></div></div>
+        <div class="step"><span class="n"></span><div class="body"><h4>Downgrade / re-upgrade</h4><p>Enforcing state is advanced by non-enforcing software and then loaded by an enforcing client again.</p></div></div>
+        <div class="step"><span class="n"></span><div class="body"><h4>Boundary reorgs</h4><p>Reorganizations crossing mandatory-signaling, activation, and expiry boundaries.</p></div></div>
+        <div class="step"><span class="n"></span><div class="body"><h4>Pre-applicability history</h4><p>No false-positive rebuild requirement for blocks before any BIP110 rule applies.</p></div></div>
+      </div>
+      <p class="prose" style="color:var(--ink-faint); font-size:13px; margin-top:16px;">
+        At least one fix regression test should use separate enforcing / non-enforcing binaries rather than
+        only <code>-vbparams</code>. The audit reproducer already supports this through <code>--legacy-bitcoind</code>.
+      </p>
+
+      <div class="prose" style="margin-top:40px;">
+        <h3 style="font-family:var(--mono); font-size:13px; letter-spacing:0.06em; text-transform:uppercase; color:var(--ink-faint); margin:0 0 4px;">Operational mitigation before a code fix</h3>
+        <p style="color:var(--ink-soft); font-size:15px; margin-bottom:0;">For an unpruned node that may have connected applicable blocks before enabling BIP110, rebuild the UTXO chainstate through <code>ConnectBlock()</code> with the script-check shortcut disabled:</p>
+      </div>
+      <div class="mitig-cmd"><span class="prompt">$</span> bitcoind … -reindex-chainstate -assumevalid=0</div>
+      <p class="prose" style="color:var(--ink-faint); font-size:13px; margin-top:12px;">
+        The explicit <code>-assumevalid=0</code> matters because buried script checks can otherwise be
+        skipped. In this checkout, mainnet's compiled <code>defaultAssumeValid</code> is height 912,683,
+        before the calculated mandatory-signaling range; user-supplied values and future releases still
+        require review. Pruned nodes and AssumeUTXO chainstates may lack the historical data for complete
+        local reconnection and can require a full <code>-reindex</code> / redownload.
+      </p>
+
+      <div class="prose" style="margin-top:24px;">
+        <p style="color:var(--ink-soft); font-size:15px; margin-bottom:0;">A one-time diagnostic can also reconnect every available block:</p>
+      </div>
+      <div class="mitig-cmd"><span class="prompt">$</span> bitcoind … -checklevel=4 -checkblocks=0 -assumevalid=0</div>
+      <p class="prose" style="color:var(--ink-faint); font-size:13px; margin-top:12px;">
+        This detected the unpruned audit case, but it is expensive, is not a durable provenance mechanism,
+        and stops at missing pruned data. A partial level-4 scan is not proof of complete applicable history.
+      </p>
+
+      <div class="detail-block prose">
+        <h3 class="minihead">Remaining work before disclosure or remediation sign-off</h3>
+        <p>The demonstrated divergence does not depend on these follow-ups, but they remain useful:</p>
+        <ul class="compact-list">
+          <li>Refresh the height-specific mainnet deployment-state calculation immediately before disclosure or release.</li>
+          <li>Dynamically test AssumeUTXO/background-chainstate behavior.</li>
+          <li>Dynamically exercise an interrupted coins flush followed by <code>ReplayBlocks()</code>; the current replay conclusion is source-derived.</li>
+          <li>Prototype the provenance guard and run the full functional suite.</li>
+          <li>Have a second reviewer independently reproduce the result from this report.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- PATCH -->
+  <section id="patch">
+    <div class="wrap">
+      <div class="sectionhead prose">
+        <span class="num">11 / The patch</span>
+        <h2>What the proposed fix actually looks like.</h2>
+        <p class="sub">
+          A draft implementation — <a href="https://github.com/DathonPwn/bitcoin/pull/1">DathonPwn/bitcoin&nbsp;#1</a>,
+          <em>"validation: require BIP110 revalidation after late upgrade"</em> — builds Option A on top of the
+          audited commit. It adds a durable per-block marker, a startup ancestry scan, and fail-closed
+          recovery: the exact three pieces SegWit has and BIP110 lacked. A second commit,
+          <em>"distinguish BIP110 validation phases,"</em> splits the marker into separate signaling and
+          active-rule bits.
+        </p>
+      </div>
+
+      <div class="mathrow six">
+        <div class="p"><p class="pk">Base</p><p class="pv" style="font-size:11px;">29.x-knots</p></div>
+        <div class="p"><p class="pk">Files changed</p><p class="pv">7</p></div>
+        <div class="p"><p class="pk">Insertions</p><p class="pv" style="color:var(--valid);">+391</p></div>
+        <div class="p"><p class="pk">Deletions</p><p class="pv" style="color:var(--danger);">−2</p></div>
+        <div class="p"><p class="pk">Commits</p><p class="pv">2</p></div>
+        <div class="p"><p class="pk">New test</p><p class="pv" style="font-size:10.5px;">286 lines · 7 cases</p></div>
+      </div>
+
+      <div class="status-note" style="margin-top:24px;">
+        <div><span class="k">Independent verification</span><span class="v">Built the enforcing binary from PR head <code>b57f70afd5</code> and ran the regression locally — all 7 cases passed.</span></div>
+        <div><span class="k">Result</span><span class="v"><code style="color:var(--valid);">Tests successful</code> — including the new phase-specific provenance case.</span></div>
+      </div>
+
+      <!-- The applicability helper -->
+      <div class="prose" style="margin-top:44px;">
+        <h3 style="font-size:19px; font-weight:640; margin:0 0 6px;">One helper returns which phases applied</h3>
+        <p style="color:var(--ink-soft); margin:0;">
+          The report proposed a conceptual boolean <code>BIP110ValidationRequiredAt()</code>. The updated
+          patch ships something more precise: <code>ReducedDataValidationStatusAt()</code> returns a
+          <em>bitmask</em> of the two phases — signaling and active — so each is tracked independently rather
+          than collapsed into one "applicable" flag.
+        </p>
+      </div>
+      <div class="src" style="margin-top:16px;">
+        <div class="src-head">
+          <span class="file">src/validation.cpp — new static helper</span>
+          <span class="fn shipped">+ added</span>
+        </div>
+        <pre class="code"><span class="cl add cm">/** BIP110/RDTS consensus-rule phases selected while connecting this block. */</span><span class="cl add"><span class="kw">static uint32_t</span> <span class="fu">ReducedDataValidationStatusAt</span>(<span class="kw">const</span> CBlockIndex&amp; block_index,</span><span class="cl add">                                        <span class="kw">const</span> ChainstateManager&amp; chainman)</span><span class="cl add">{</span><span class="cl add">  <span class="kw">const auto</span> deployment{Consensus::DEPLOYMENT_REDUCED_DATA};</span><span class="cl add">  <span class="kw">const</span> ThresholdState state{chainman.m_versionbitscache.State(</span><span class="cl add">      block_index.pprev, params, deployment)};</span><span class="cl add">  <span class="kw">uint32_t</span> status{0};</span><span class="cl add">  <span class="kw">if</span> (DeploymentActiveAt(block_index, chainman, deployment))</span><span class="cl add">    status |= BLOCK_OPT_REDUCED_DATA_ACTIVE;</span><span class="cl add">  <span class="kw">if</span> (DeploymentMustSignalAfter(block_index.pprev, params, deployment, state))</span><span class="cl add">    status |= BLOCK_OPT_REDUCED_DATA_SIGNAL;</span><span class="cl add">  <span class="kw">return</span> status;</span><span class="cl add">}</span></pre>
+      </div>
+
+      <div class="callout">
+        <span class="lbl">Why the two-bit split matters — proven by a new test</span>
+        <p>
+          A block can be connected while the deployment is <strong>ACTIVE</strong> but with mandatory
+          <strong>signaling</strong> not yet enforced. A single "applicable" bit would let that block's
+          active-rule provenance wrongly satisfy a later signaling check. The updated test
+          <code>test_phase_specific_provenance</code> connects 145 non-signaling blocks under ACTIVE rules,
+          upgrades to a signaling-enforcing config, and confirms startup <em>still</em> refuses — the ACTIVE
+          bit cannot stand in for the SIGNAL bit. I ran this case locally; it passes.
+        </p>
+      </div>
+
+      <!-- The three pieces, now filled in -->
+      <div class="prose" style="margin-top:52px;">
+        <h3 style="font-size:19px; font-weight:640; margin:0 0 6px;">The three missing guard pieces, now present</h3>
+        <p style="color:var(--ink-soft); margin:0;">
+          Compare against Section 07: each <code>∅</code> is now real code. Added lines are green.
+        </p>
+      </div>
+
+      <div class="guard" style="margin-top:24px;">
+
+        <!-- PIECE 1 -->
+        <div class="guard-piece">
+          <div class="gp-head">
+            <span class="gp-n">1</span>
+            <div class="gp-t">
+              <h3>Durable marker</h3>
+              <p>A dedicated block-index status bit, set only after successful connection.</p>
+            </div>
+            <div class="gp-status"><span class="yes">now ✓</span></div>
+          </div>
+          <div class="gp-cols">
+            <div class="gp-col seg">
+              <p class="cl-head" style="color:var(--valid);"><span class="badge-dot" style="background:var(--valid);"></span>The new bit — src/chain.h</p>
+              <div class="src">
+                <div class="src-head"><span class="file">src/chain.h</span><span class="fn shipped">+ added</span></div>
+                <pre class="code"><span class="cl">  BLOCK_STATUS_RESERVED         = <span class="st">256</span>,</span><span class="cl add">  BLOCK_OPT_REDUCED_DATA_ACTIVE = <span class="st">512</span>,</span><span class="cl add cm">  //!&lt; active BIP110/RDTS tx &amp; script rules</span><span class="cl add">  BLOCK_OPT_REDUCED_DATA_SIGNAL = <span class="st">1024</span>,</span><span class="cl add cm">  //!&lt; BIP110/RDTS mandatory signaling enforced</span></pre>
+              </div>
+              <p style="font-size:12.5px; color:var(--ink-soft); margin:12px 0 0;">
+                Two fresh, unambiguous bits (<code>512</code> and <code>1024</code>) — not the reserved
+                AssumeUTXO bit, exactly as the report cautioned. Splitting them lets provenance record
+                <em>which</em> phase was enforced, not merely that some rule applied.
+              </p>
+            </div>
+            <div class="gp-col rdts" style="border-left:1px solid var(--hair);">
+              <p class="cl-head" style="color:var(--valid);"><span class="badge-dot" style="background:var(--valid);"></span>Set after connection — validation.cpp</p>
+              <div class="src">
+                <div class="src-head"><span class="file">Chainstate::ConnectBlock()</span><span class="fn shipped">+ added</span></div>
+                <pre class="code"><span class="cl add cm">// Record the specific BIP110 phases selected</span><span class="cl add cm">// while connecting this block.</span><span class="cl add"><span class="kw">const uint32_t</span> reduced_data_status{</span><span class="cl add">    ReducedDataValidationStatusAt(*pindex, m_chainman)};</span><span class="cl add"><span class="kw">if</span> ((pindex-&gt;nStatus &amp; reduced_data_status) != reduced_data_status) {</span><span class="cl add">  pindex-&gt;nStatus |= reduced_data_status;</span><span class="cl add">  m_blockman.m_dirty_blockindex.insert(pindex);</span><span class="cl add">}</span></pre>
+              </div>
+              <p style="font-size:12.5px; color:var(--ink-soft); margin:12px 0 0;">
+                Placed after the <code>BLOCK_VALID_SCRIPTS</code> raise, on the real
+                (non-<code>fJustCheck</code>) connection path — so it records validation, not receipt. The
+                <code>&amp;</code>/<code>!=</code> guard sets only the missing phase bits.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- PIECE 2 -->
+        <div class="guard-piece">
+          <div class="gp-head">
+            <span class="gp-n">2</span>
+            <div class="gp-t">
+              <h3>Startup ancestry scan</h3>
+              <p>A BIP110 analogue of <code>NeedsRedownload()</code> — the piece with the most nuance.</p>
+            </div>
+            <div class="gp-status"><span class="yes">now ✓</span></div>
+          </div>
+          <div class="gp-cols" style="grid-template-columns:1fr;">
+            <div class="gp-col seg" style="border-right:none;">
+              <p class="cl-head" style="color:var(--valid);"><span class="badge-dot" style="background:var(--valid);"></span>Chainstate::NeedsReducedDataRevalidation()</p>
+              <div class="src">
+                <div class="src-head"><span class="file">src/validation.cpp</span><span class="fn shipped">+ added</span></div>
+                <pre class="code"><span class="cl add"><span class="kw">bool</span> Chainstate::<span class="fu">NeedsReducedDataRevalidation</span>() <span class="kw">const</span> {</span><span class="cl add">  <span class="kw">const</span> CBlockIndex* tip{m_chain.Tip()};</span><span class="cl add">  <span class="kw">if</span> (tip == <span class="kw">nullptr</span> || !DeploymentEnabled(...)) <span class="kw">return false</span>;</span><span class="cl add"></span><span class="cl add cm">  // 1. bounded mandatory-signaling window</span><span class="cl add">  <span class="kw">if</span> (max_activation_height &lt; INT_MAX) {</span><span class="cl add">    first = max(1, max_activation_height − 2*period);</span><span class="cl add">    last  = min(tip-&gt;nHeight, max_activation_height − period − 1);</span><span class="cl add">    <span class="kw">for</span> (height = first; height &lt;= last; ++height)</span><span class="cl add">      <span class="kw">if</span> (DeploymentMustSignalAfter(...) &amp;&amp;</span><span class="cl add">          !(index-&gt;nStatus &amp; BLOCK_OPT_REDUCED_DATA_SIGNAL)) <span class="kw">return true</span>;</span><span class="cl add">  }</span><span class="cl add"></span><span class="cl add cm">  // 2. complete historical ACTIVE range — even after EXPIRED</span><span class="cl add">  next_state = State(tip, ...);</span><span class="cl add">  <span class="kw">if</span> (next_state == ACTIVE)  activation_height = StateSinceHeight(tip, ...);</span><span class="cl add">  <span class="kw">else if</span> (next_state == EXPIRED) { <span class="cm">/* recover pre-expiry activation */</span> }</span><span class="cl add"></span><span class="cl add">  <span class="kw">if</span> (activation_height &gt;= 0 &amp;&amp; active_duration &gt; 0) {</span><span class="cl add">    last_active = min(tip-&gt;nHeight, activation_height + active_duration − 1);</span><span class="cl add">    <span class="kw">for</span> (height = ...; height &lt;= last_active; ++height)</span><span class="cl add">      <span class="kw">if</span> (DeploymentActiveAt(...) &amp;&amp;</span><span class="cl add">          !(index-&gt;nStatus &amp; BLOCK_OPT_REDUCED_DATA_ACTIVE)) <span class="kw">return true</span>;</span><span class="cl add">  }</span><span class="cl add">  <span class="kw">return false</span>;</span><span class="cl add">}</span></pre>
+              </div>
+            </div>
+          </div>
+          <div style="padding:0 24px 22px;">
+            <div class="callout" style="margin-top:4px;">
+              <span class="lbl">Goes beyond the report's sketch</span>
+              <p>
+                The report described scanning "every applicable active-chain block." This scan is sharper:
+                it walks the mandatory-signaling window <em>and</em> the full historical ACTIVE range
+                <em>separately</em>, and deliberately reconstructs the activation height even when the
+                deployment has already reached <code>EXPIRED</code> — so a disable-then-re-enable-after-expiry
+                cycle is still caught. That case gets its own regression test.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- PIECE 3 -->
+        <div class="guard-piece">
+          <div class="gp-head">
+            <span class="gp-n">3</span>
+            <div class="gp-t">
+              <h3>Fail-closed recovery</h3>
+              <p>Startup refuses when provenance is missing — mirroring the SegWit guard beside it.</p>
+            </div>
+            <div class="gp-status"><span class="yes">now ✓</span></div>
+          </div>
+          <div class="gp-cols" style="grid-template-columns:1fr;">
+            <div class="gp-col seg" style="border-right:none;">
+              <p class="cl-head" style="color:var(--valid);"><span class="badge-dot" style="background:var(--valid);"></span>src/node/chainstate.cpp — right after the SegWit check</p>
+              <div class="src">
+                <div class="src-head"><span class="file">CompleteChainstateInitialization()</span><span class="fn shipped">+ added</span></div>
+                <pre class="code"><span class="cl add"><span class="kw">if</span> (std::any_of(chainstates.begin(), chainstates.end(),</span><span class="cl add">    [](<span class="kw">const</span> Chainstate* cs) { <span class="kw">return</span> cs-&gt;NeedsReducedDataRevalidation(); })) {</span><span class="cl add"><span class="kw">  return</span> {ChainstateLoadStatus::FAILURE, _(</span><span class="cl add">    <span class="st">"Blocks subject to BIP110/RDTS require validation.</span></span><span class="cl add">    <span class="st"> Please restart with -reindex-chainstate."</span>)};</span><span class="cl add">}</span></pre>
+              </div>
+            </div>
+          </div>
+          <div style="padding:0 24px 22px;">
+            <div class="term" style="margin-top:4px;">
+              <div class="term-bar"><span class="d"></span><span class="d"></span><span class="d"></span><span class="t">operator sees on failed startup</span></div>
+              <pre><span class="up">Error:</span> Blocks subject to BIP110/RDTS require validation.
+Please restart with -reindex-chainstate.</pre>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- AssumeUTXO handling -->
+      <div class="prose" style="margin-top:52px;">
+        <h3 style="font-size:19px; font-weight:640; margin:0 0 6px;">AssumeUTXO handled the way the report demanded</h3>
+        <p style="color:var(--ink-soft); margin:0;">
+          The report warned against <em>blindly</em> faking provenance for snapshots. The patch marks
+          trusted snapshot ancestors deliberately — the hardcoded commitment substitutes for reconnecting
+          them — right beside the existing SegWit snapshot handling.
+        </p>
+      </div>
+      <div class="src" style="margin-top:16px;">
+        <div class="src-head"><span class="file">ChainstateManager::PopulateAndValidateSnapshot()</span><span class="fn shipped">+ added</span></div>
+        <pre class="code"><span class="cl"><span class="kw">if</span> (DeploymentActiveAt(*index, *<span class="kw">this</span>, DEPLOYMENT_SEGWIT))</span><span class="cl">  index-&gt;nStatus |= BLOCK_OPT_WITNESS;</span><span class="cl add cm">// The hardcoded snapshot commitment substitutes for reconnecting</span><span class="cl add cm">// its ancestors, so treat applicable BIP110 phases as validated too.</span><span class="cl add">index-&gt;nStatus |= ReducedDataValidationStatusAt(*index, *<span class="kw">this</span>);</span></pre>
+      </div>
+
+      <!-- design-requirement mapping -->
+      <div class="prose" style="margin-top:52px;">
+        <h3 style="font-size:19px; font-weight:640; margin:0 0 6px;">Does it meet the report's design requirements?</h3>
+        <p style="color:var(--ink-soft); margin:0;">
+          Section 10 listed the properties a per-block provenance marker must satisfy. The updated draft
+          addresses each — and the second commit adds phase separation on top:
+        </p>
+      </div>
+      <div class="tablewrap">
+        <table aria-label="Report design requirement mapped to shipped code">
+          <thead><tr><th>Report requirement</th><th>How the patch satisfies it</th><th></th></tr></thead>
+          <tbody>
+            <tr class="maprow"><td>Cover every applicable phase</td><td>One helper returns a bitmask of both phases — <code>DeploymentActiveAt</code> and <code>DeploymentMustSignalAfter</code> — tracked as separate bits.</td><td><span class="done">done</span></td></tr>
+            <tr class="maprow"><td>Record successful connection</td><td>Marker set after the <code>BLOCK_VALID_SCRIPTS</code> raise in <code>ConnectBlock()</code>.</td><td><span class="done">done</span></td></tr>
+            <tr class="maprow"><td>Exclude weak paths</td><td>Not set on receipt or in non-enforcing builds; the helper returns false when RDTS is inactive at that ancestry.</td><td><span class="done">done</span></td></tr>
+            <tr class="maprow"><td>Exclude dry runs</td><td>Set on the real connect path, not <code>fJustCheck</code> validation.</td><td><span class="done">done</span></td></tr>
+            <tr class="maprow"><td>Bind to a fixed ruleset</td><td>Marker keyed to <code>DEPLOYMENT_REDUCED_DATA</code>; the regression exercises multiple <code>-vbparams</code> states.</td><td><span class="done">done</span></td></tr>
+            <tr class="maprow"><td>Scan the complete applicable ancestry</td><td><code>NeedsReducedDataRevalidation()</code> walks the mandatory window and the entire ACTIVE range, including post-EXPIRED.</td><td><span class="done">done</span></td></tr>
+            <tr class="maprow"><td>Fail closed with correct recovery</td><td>Startup refuses and names <code>-reindex-chainstate</code>; pruned nodes are steered to full <code>-reindex</code>.</td><td><span class="done">done</span></td></tr>
+            <tr class="maprow"><td>Distinguish signaling from active rules</td><td>Two separate bits; the new <code>test_phase_specific_provenance</code> proves ACTIVE provenance cannot satisfy a signaling check.</td><td><span class="done">done</span></td></tr>
+            <tr class="maprow"><td>New unambiguous status bit</td><td>Uses fresh bits <code>512</code> and <code>1024</code>, not the reserved AssumeUTXO bit.</td><td><span class="done">done</span></td></tr>
+            <tr class="maprow"><td>AssumeUTXO trust is explicit</td><td>Snapshot ancestors marked deliberately alongside the SegWit precedent.</td><td><span class="done">done</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout" style="margin-top:28px; border-left-color: var(--danger); background: var(--danger-soft);">
+        <span class="lbl" style="color: var(--danger);">One item still open — independently confirmed</span>
+        <p>
+          The report flagged the <code>assumevalid</code> interaction, and reading the updated code confirms
+          it survives. In <code>ConnectBlock()</code>, the RDTS <em>script</em> rule runs only when
+          <code>fScriptChecks</code> is true (which <code>assumevalid</code> sets false for sufficiently
+          buried ancestors), but the marker at line 3088 is set with <strong>no <code>fScriptChecks</code>
+          condition</strong>. So during a reindex that trusts an <code>assumevalid</code> checkpoint, a block
+          can receive <code>BLOCK_OPT_REDUCED_DATA_ACTIVE</code> even though its script rule never executed.
+          The output-size rule is safe — it runs unconditionally — so only the script-rule portion of the
+          ACTIVE phase is exposed. The patch's tests avoid this by always recovering with
+          <code>-assumevalid=0</code>. This remains the sharpest open question before the fix is complete.
+        </p>
+      </div>
+
+      <!-- validation results -->
+      <div class="prose" style="margin-top:44px;">
+        <h3 class="minihead">Validation — independently re-run</h3>
+        <p style="color:var(--ink-soft); font-size:15px; margin:0;">
+          I built the enforcing binary from PR head <code>b57f70afd5</code> and ran the late-upgrade
+          regression locally — all 7 cases passed (<code style="color:var(--valid);">Tests successful</code>).
+          The PR additionally reports the following as passing; those were not re-run here:
+        </p>
+      </div>
+      <div class="detail-grid" style="margin-top:18px;">
+        <div class="detail-box">
+          <h4>New regression — 7 cases</h4>
+          <p>Output-size, script, mandatory-signaling, pruning, safe pre-activation upgrade, disable/re-enable-after-expiry, and the new phase-specific provenance case. Optionally run against a separately compiled non-enforcing bitcoind for the initial history.</p>
+        </div>
+        <div class="detail-box">
+          <h4>Unit suites</h4>
+          <p>Full suite (657 cases) plus focused <code>versionbits_tests</code>, <code>validation_chainstate_tests</code>, <code>validation_chainstatemanager_tests</code>, <code>txvalidationcache_tests</code>.</p>
+        </div>
+        <div class="detail-box">
+          <h4>Functional set</h4>
+          <p><code>feature_rdts.py</code>, the two reduced-data suites, <code>feature_presegwit_node_upgrade.py</code>, and <code>feature_assumeutxo.py</code>.</p>
+        </div>
+        <div class="detail-box">
+          <h4>Scope</h4>
+          <p>Draft confined to the fork. It does not open or modify any pull request, issue, or branch in <code>bitcoinknots/bitcoin</code>.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap prose">
+      <div class="rootcause">
+        <span class="lbl">Concise root cause · BlockSlop</span>
+        <p>
+          BIP110 adds consensus checks to <code>ConnectBlock()</code>, but the activation client keeps no
+          persisted record tying an existing chainstate to BIP110 enforcement. A late-upgraded node loads
+          and trusts chainstate produced under non-enforcing rules, and default level-3 startup does not
+          reconnect those blocks. A BIP110-invalid ancestor can remain active across ordinary restarts
+          until revalidation or a reorganization removes it — while a fresh node enforcing the same rules
+          rejects the identical block.
+        </p>
+      </div>
+    </div>
+  </footer>
+</main>
+</body>
+</html>
